@@ -1,0 +1,42 @@
+# Add to: novohq/Novo_Mobile_UIAutomation_Appium/.github/workflows/nexus-scan.yml
+name: NEXUS Sheet Auto-Update (Mobile)
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/test/**/*.java'
+      - 'src/main/java/pages/**/*.java'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test repo
+        uses: actions/checkout@v4
+        with:
+          path: mobile-repo
+
+      - name: Checkout scan scripts
+        uses: actions/checkout@v4
+        with:
+          repository: novohq/autoupdate-scripts
+          path: scripts
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install gspread oauth2client
+
+      - name: Run NEXUS scan + update sheet
+        env:
+          GOOGLE_SHEETS_CREDS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDS_JSON }}
+          NEXUS_SHEET_ID: ${{ secrets.NEXUS_SHEET_ID }}
+          WEB_REPO_PATH: /dev/null
+          MOBILE_REPO_PATH: ${{ github.workspace }}/mobile-repo
+        working-directory: scripts
+        run: python rebuild_sheet.py --mobile-only
