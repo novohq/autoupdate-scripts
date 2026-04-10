@@ -393,8 +393,10 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     total_scripts = web_scripts + and_scripts + ios_scripts
     total_modules = len(web) + len(android) + len(ios)
     prod_v = andp_v + iosp_v
+    total_v_no_prod = web_v + and_v + ios_v
+    total_p_no_prod = web_p + and_p + ios_p
     rows.append(build_total_row(['TOTAL', total_modules, total_scripts,
-                                  web_v+and_v+ios_v, web_p+and_p+ios_p, grand_v+grand_p, prod_v, '']))
+                                  total_v_no_prod, total_p_no_prod, total_v_no_prod + total_p_no_prod, prod_v, '']))
     # Row 9: blank
     rows.append(build_empty_row(NC))
 
@@ -773,13 +775,19 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
     rows.append(build_header_row(headers))
 
     num = 1
+    seen = set()  # Deduplicate by (file, description)
     for mn in sorted(data.keys()):
         # Only show actual verifications — exclude pre-conditions
         for a in data[mn].get('assertions', []):
             if a.get('type') == 'Pre-condition':
-                continue  # Skip pre-conditions in detail sheets
+                continue
             if a.get('type') == 'Assert.fail':
-                continue  # Safety: exclude Assert.fail
+                continue
+            # Deduplicate: skip if same file + same description already seen
+            dedup_key = (a.get('file', ''), a['description'])
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
             # Build row with bold description
             row_cells = [
                 data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
@@ -999,7 +1007,7 @@ def main():
     print('\n[3/4] Building and writing sheets with data + formatting...')
 
     # --- Grand Summary ---
-    print('  1/12 Grand Summary...')
+    print('  1/10 Grand Summary...')
     gs_rows, gs_widths, gs_freeze, gs_merges = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, grand_ws, gs_rows, gs_widths, gs_freeze)
     print(f'    {len(gs_rows)} rows written')
@@ -1009,7 +1017,7 @@ def main():
     time.sleep(1)
 
     # --- Web Summary ---
-    print('  2/12 Web Summary...')
+    print('  2/10 Web Summary...')
     ws = get_or_create(ss, 'Web Summary')
     r, cw, fr = build_platform_summary('Web Summary', web, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1017,7 +1025,7 @@ def main():
     time.sleep(0.5)
 
     # --- Android Summary ---
-    print('  3/12 Android Summary...')
+    print('  3/10 Android Summary...')
     ws = get_or_create(ss, 'Android Summary')
     r, cw, fr = build_platform_summary('Android Summary', android, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1025,7 +1033,7 @@ def main():
     time.sleep(0.5)
 
     # --- iOS Summary ---
-    print('  4/12 iOS Summary...')
+    print('  4/10 iOS Summary...')
     ws = get_or_create(ss, 'iOS Summary')
     r, cw, fr = build_platform_summary('iOS Summary', ios, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1033,7 +1041,7 @@ def main():
     time.sleep(0.5)
 
     # --- Production Suites ---
-    print('  5/12 Production Suites...')
+    print('  5/10 Production Suites...')
     ws = get_or_create(ss, 'Production Suites')
     r, cw, fr = build_prod_suites(android_prod, ios_prod, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1042,9 +1050,7 @@ def main():
 
     # --- Detail sheets ---
     detail_configs = [
-        ('Web - Cards', {'Cards': web.get('Cards', {'assertions': [], 'files': set(), 'types': {}})}, 200),
-        ('Web - Checking', {'Checking': web.get('Checking', {'assertions': [], 'files': set(), 'types': {}})}, None),
-        ('Web - Invoices', {'Invoices': web.get('Invoices', {'assertions': [], 'files': set(), 'types': {}})}, None),
+        ('Web - All', web, 300),
         ('Android - All', android, 300),
         ('iOS - All', ios, 300),
         ('Production - All', {**android_prod, **ios_prod}, 200),
@@ -1060,7 +1066,7 @@ def main():
         time.sleep(0.5)
 
     # --- Verification Types ---
-    print('  12/12 Verification Types...')
+    print('  10/10 Verification Types...')
     ws = get_or_create(ss, 'Verification Types')
     r, cw, fr = build_verification_types(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1076,7 +1082,7 @@ def main():
 
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
-    print(f'DONE! All 12 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
+    print(f'DONE! All 10 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
     print(f'Sheet: https://docs.google.com/spreadsheets/d/{SHEET_ID}')
     print(f'{"=" * 60}')
 
