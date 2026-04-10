@@ -280,6 +280,10 @@ def post_process_modules(modules):
                 new_types['Pre-condition'] = new_types.get('Pre-condition', 0) + 1
                 continue
 
+            # Step 1b: Exclude Assert.fail (catch-all error handlers, not real verifications)
+            if a['type'] == 'Assert.fail':
+                continue
+
             # Step 2: Deduplicate login verifications
             if is_login_verification(a):
                 login_key = a['description']
