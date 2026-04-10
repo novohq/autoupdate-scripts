@@ -46,6 +46,32 @@ TYPE_FORMAT_MAP = {
 }
 # Note: Assert.fail is excluded by nexus_scan.py post_process_modules() and should never appear in output
 
+# ==================== EXECUTIVE DASHBOARD CONSTANTS ====================
+
+MANUAL_TIME_PER_VERIFICATION_MINS = 2.5
+CI_TIMES_HOURS = {'Web': 4, 'Android': 3, 'iOS': 2}
+TOTAL_KNOWN_MODULES = 15  # denominator for maturity calculation
+
+# Dashboard colors
+DARK_BG = rgb_dict(0.118, 0.161, 0.231)           # #1E293B
+KPI_BLUE = rgb_dict(0.231, 0.510, 0.961)          # #3B82F6
+KPI_GREEN = rgb_dict(0.063, 0.725, 0.506)         # #10B981
+KPI_PURPLE = rgb_dict(0.545, 0.361, 0.965)        # #8B5CF6
+KPI_AMBER = rgb_dict(0.961, 0.620, 0.043)         # #F59E0B
+LABEL_GRAY = rgb_dict(0.580, 0.639, 0.722)        # #94A3B8
+
+# Heatmap backgrounds
+HEATMAP_HIGH_BG = rgb_dict(0.820, 0.980, 0.898)   # #D1FAE5
+HEATMAP_MED_BG = rgb_dict(0.859, 0.922, 0.980)    # #DBEAFE
+HEATMAP_LOW_BG = rgb_dict(0.996, 0.953, 0.780)    # #FEF3C7
+HEATMAP_NONE_BG = rgb_dict(0.996, 0.886, 0.886)   # #FEE2E2
+HEATMAP_NONE_FG = rgb_dict(0.600, 0.600, 0.600)   # gray
+
+# Maturity colors
+MATURE_GREEN = rgb_dict(0.024, 0.573, 0.275)      # green text
+GROWING_AMBER = rgb_dict(0.750, 0.500, 0.000)     # amber text
+EARLY_PURPLE = rgb_dict(0.545, 0.361, 0.965)      # purple text
+
 # ==================== HEADER COMMENTS (hover notes) ====================
 
 HEADER_COMMENTS = {
@@ -86,7 +112,8 @@ HEADER_COMMENTS = {
 # ==================== CELL BUILDER ====================
 
 def make_cell(value, bg=None, fg=None, bold=False, font_size=10, halign='LEFT',
-              font_family='Inter', border_bottom=None, border_top=None, note=None):
+              font_family='Inter', border_bottom=None, border_top=None, border_left=None,
+              valign='MIDDLE', wrap_strategy=None, note=None):
     """Build a CellData dict with both userEnteredValue and userEnteredFormat."""
     cell = {}
 
@@ -106,17 +133,24 @@ def make_cell(value, bg=None, fg=None, bold=False, font_size=10, halign='LEFT',
             'fontFamily': font_family,
         },
         'horizontalAlignment': halign,
-        'verticalAlignment': 'MIDDLE',
+        'verticalAlignment': valign,
     }
     if fg:
         fmt['textFormat']['foregroundColorStyle'] = {'rgbColor': fg}
     if bg:
         fmt['backgroundColorStyle'] = {'rgbColor': bg}
+    if wrap_strategy:
+        fmt['wrapStrategy'] = wrap_strategy
 
+    borders = {}
     if border_bottom:
-        fmt['borders'] = {'bottom': {'style': 'SOLID', 'width': 2, 'colorStyle': {'rgbColor': border_bottom}}}
+        borders['bottom'] = {'style': 'SOLID', 'width': 2, 'colorStyle': {'rgbColor': border_bottom}}
     if border_top:
-        fmt.setdefault('borders', {})['top'] = {'style': 'SOLID', 'width': 2, 'colorStyle': {'rgbColor': border_top}}
+        borders['top'] = {'style': 'SOLID', 'width': 2, 'colorStyle': {'rgbColor': border_top}}
+    if border_left:
+        borders['left'] = {'style': 'SOLID', 'width': 3, 'colorStyle': {'rgbColor': border_left}}
+    if borders:
+        fmt['borders'] = borders
 
     cell['userEnteredFormat'] = fmt
 
@@ -313,8 +347,16 @@ def _count_verifications(data):
 def _count_preconditions(data):
     return sum(len(m.get('preconditions', [])) for m in data.values())
 
+def _section_title_row(text, nc, note=None):
+    """Build a section title row with left blue accent."""
+    cells = [make_cell(text, bg=DARK_BG, fg=TITLE_FG, bold=True, font_size=12,
+                       border_left=BLUE_BORDER, note=note)]
+    cells += [make_cell('', bg=DARK_BG) for _ in range(nc - 1)]
+    return cells
+
+
 def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
-    """Build all rows for Grand Summary sheet."""
+    """Build all rows for Grand Summary sheet including executive dashboard."""
     web_v = _count_verifications(web)
     and_v = _count_verifications(android)
     ios_v = _count_verifications(ios)
@@ -328,8 +370,10 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     grand_v = web_v + and_v + ios_v + andp_v + iosp_v
     grand_p = web_p + and_p + ios_p + andp_p + iosp_p
 
-    NC = 7  # num cols (added Pre-conditions)
+    NC = 8  # expanded to 8 columns for dashboard boxes
+    merges = []  # collect merge requests
     rows = []
+
     # Row 1: Title
     rows.append(build_title_row('NEXUS Verification Registry', NC))
     # Row 2: Timestamp
@@ -337,41 +381,340 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     # Row 3: blank
     rows.append(build_empty_row(NC))
     # Row 4: Header
-    rows.append(build_header_row(['Platform', 'Modules', 'Test Scripts', 'Verifications', 'Pre-conditions', 'Total', 'Prod Suites']))
+    rows.append(build_header_row(['Platform', 'Modules', 'Test Scripts', 'Verifications', 'Pre-conditions', 'Total', 'Prod Suites', '']))
     # Rows 5-7: Platform data
-    rows.append(build_data_row(['Web', len(web), sum(len(m['files']) for m in web.values()), web_v, web_p, web_v + web_p, 0], alt=False))
-    rows.append(build_data_row(['Android', len(android), sum(len(m['files']) for m in android.values()), and_v, and_p, and_v + and_p, andp_v], alt=True))
-    rows.append(build_data_row(['iOS', len(ios), sum(len(m['files']) for m in ios.values()), ios_v, ios_p, ios_v + ios_p, iosp_v], alt=False))
+    web_scripts = sum(len(m['files']) for m in web.values())
+    and_scripts = sum(len(m['files']) for m in android.values())
+    ios_scripts = sum(len(m['files']) for m in ios.values())
+    rows.append(build_data_row(['Web', len(web), web_scripts, web_v, web_p, web_v + web_p, 0, ''], alt=False))
+    rows.append(build_data_row(['Android', len(android), and_scripts, and_v, and_p, and_v + and_p, andp_v, ''], alt=True))
+    rows.append(build_data_row(['iOS', len(ios), ios_scripts, ios_v, ios_p, ios_v + ios_p, iosp_v, ''], alt=False))
     # Row 8: TOTAL
-    rows.append(build_total_row(['TOTAL', len(web)+len(android)+len(ios),
-                                  sum(len(m['files']) for d in [web,android,ios] for m in d.values()),
-                                  web_v+and_v+ios_v, web_p+and_p+ios_p, grand_v+grand_p, andp_v+iosp_v]))
+    total_scripts = web_scripts + and_scripts + ios_scripts
+    total_modules = len(web) + len(android) + len(ios)
+    prod_v = andp_v + iosp_v
+    rows.append(build_total_row(['TOTAL', total_modules, total_scripts,
+                                  web_v+and_v+ios_v, web_p+and_p+ios_p, grand_v+grand_p, prod_v, '']))
     # Row 9: blank
     rows.append(build_empty_row(NC))
 
     # Row 10: Verification Types header
-    vt_start_idx = len(rows)  # track for chart data source
-    rows.append(build_header_row(['Verification Types', 'Web', 'Android', 'iOS', 'Prod', 'Total', '']))
+    rows.append(build_header_row(['Verification Types', 'Web', 'Android', 'iOS', 'Prod', 'Total', '', '']))
     all_types = sorted(set(t for d in [web,android,ios,android_prod,ios_prod] for m in d.values() for t in m['types']))
-    all_types = [t for t in all_types if t != 'Assert.fail']  # Safety: exclude Assert.fail
-    # Rename 'waitForElement' display and handle Pre-condition
+    all_types = [t for t in all_types if t != 'Assert.fail']
     for i, t in enumerate(all_types):
         display_name = 'Pre-condition (waitForElement)' if t == 'Pre-condition' else t
         wc = sum(m['types'].get(t,0) for m in web.values())
         ac = sum(m['types'].get(t,0) for m in android.values())
         ic = sum(m['types'].get(t,0) for m in ios.values())
         pc = sum(m['types'].get(t,0) for d in [android_prod,ios_prod] for m in d.values())
-        rows.append(build_data_row([display_name, wc, ac, ic, pc, wc+ac+ic+pc, ''], alt=(i % 2 == 1), type_col=0))
-    rows.append(build_total_row(['TOTAL', web_v+web_p, and_v+and_p, ios_v+ios_p, andp_v+iosp_v+andp_p+iosp_p, grand_v+grand_p, '']))
+        rows.append(build_data_row([display_name, wc, ac, ic, pc, wc+ac+ic+pc, '', ''], alt=(i % 2 == 1), type_col=0))
+    rows.append(build_total_row(['TOTAL', web_v+web_p, and_v+and_p, ios_v+ios_p, andp_v+iosp_v+andp_p+iosp_p, grand_v+grand_p, '', '']))
 
-    # Record where the Verification Types table starts (header row) and ends (TOTAL row)
-    # vt_header_row is the row index of the "Verification Types" header
-    # vt_total_row is the row index of the TOTAL row (last row)
-    vt_header_row = vt_start_idx
-    vt_total_row = len(rows) - 1
+    # ==================== EXECUTIVE DASHBOARD ====================
+    # 2 blank rows after Verification Types table
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
 
-    col_widths = [160, 100, 110, 120, 130, 100, 120]
-    return rows, col_widths, 4, vt_header_row, vt_total_row  # freeze_rows=4
+    # Computed values used across sections
+    total_verifications = web_v + and_v + ios_v  # excludes prod
+    platform_verifs = {'Web': web_v, 'Android': and_v, 'iOS': ios_v}
+    platform_scripts = {'Web': web_scripts, 'Android': and_scripts, 'iOS': ios_scripts}
+    platform_modules = {'Web': len(web), 'Android': len(android), 'iOS': len(ios)}
+
+    # ---- SECTION 1: HERO KPIs ----
+    print('    Section 1: Hero KPIs...')
+    r = len(rows)
+    # Number row (big numbers)
+    rows.append([
+        make_cell(f'{total_verifications:,}', bg=DARK_BG, fg=KPI_BLUE, bold=True, font_size=24, halign='CENTER',
+                  note='Total actual test checks across Web + Android + iOS (excludes pre-conditions and error handlers)'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'{total_scripts:,}', bg=DARK_BG, fg=KPI_GREEN, bold=True, font_size=24, halign='CENTER',
+                  note='Total .java test files across all repos'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'{total_modules}', bg=DARK_BG, fg=KPI_PURPLE, bold=True, font_size=24, halign='CENTER',
+                  note='Distinct test module folders detected'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'{prod_v:,}', bg=DARK_BG, fg=KPI_AMBER, bold=True, font_size=24, halign='CENTER',
+                  note='Verifications in production smoke/sanity suites'),
+        make_cell('', bg=DARK_BG),
+    ])
+    # Label row
+    rows.append([
+        make_cell('Verifications', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Scripts', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Modules', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Prod', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+    ])
+    # Merges for KPI boxes: A-B, C-D, E-F, G-H, each spanning 2 rows
+    for col_start in [0, 2, 4, 6]:
+        merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': col_start, 'endColumnIndex': col_start + 2})
+        merges.append({'startRowIndex': r + 1, 'endRowIndex': r + 2, 'startColumnIndex': col_start, 'endColumnIndex': col_start + 2})
+
+    # Spacing before section
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+
+    # ---- SECTION 2: SCRIPTS -> VERIFICATIONS ----
+    print('    Section 2: Scripts to Verifications...')
+    rows.append(_section_title_row('Test Scripts \u2192 Verifications', NC))
+    merges.append({'startRowIndex': len(rows) - 1, 'endRowIndex': len(rows), 'startColumnIndex': 0, 'endColumnIndex': NC})
+
+    # Header row for this section
+    rows.append([
+        header_cell('Platform'), header_cell('Scripts'), header_cell(''), header_cell(''),
+        header_cell(''), header_cell(''), header_cell('Verif.'), header_cell('Ratio'),
+    ])
+    # Merge C-F for bar column header
+    r = len(rows) - 1
+    merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 2, 'endColumnIndex': 6})
+
+    max_verif = max(platform_verifs.values()) if platform_verifs else 1
+    bar_colors = {'Web': KPI_BLUE, 'Android': KPI_GREEN, 'iOS': KPI_PURPLE}
+    for i, plat in enumerate(['Web', 'Android', 'iOS']):
+        v = platform_verifs[plat]
+        s = platform_scripts[plat]
+        bar_len = int(v / max_verif * 30) if max_verif > 0 else 0
+        bar_str = '\u2588' * bar_len
+        multiplier = round(v / s, 1) if s > 0 else 0
+        ratio_note = 'Verifications per script \u2014 higher means more efficient test coverage. Each script checks N things on average.' if i == 0 else None
+        rows.append([
+            make_cell(plat, bold=True, font_size=10, bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(s, font_size=10, halign='RIGHT', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(bar_str, fg=bar_colors[plat], font_size=10, bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(v, bold=True, font_size=10, halign='RIGHT', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(f'({multiplier}x)', font_size=10, halign='LEFT', bg=ALT_ROW_BG if i % 2 == 1 else None,
+                      note=ratio_note),
+        ])
+        # Merge C-F for bar
+        r = len(rows) - 1
+        merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 2, 'endColumnIndex': 6})
+
+    # Spacing before section
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+
+    # ---- SECTION 3: EFFICIENCY & ROI METRICS ----
+    print('    Section 3: Efficiency & ROI Metrics...')
+
+    # Calculate ROI numbers from actual data
+    roi_data = {}
+    for plat, v_count in [('Web', web_v), ('Android', and_v), ('iOS', ios_v)]:
+        manual_hrs = round(v_count * MANUAL_TIME_PER_VERIFICATION_MINS / 60, 1)
+        auto_hrs = CI_TIMES_HOURS[plat]
+        saved_hrs = round(manual_hrs - auto_hrs, 1)
+        reduction = round(saved_hrs / manual_hrs * 100) if manual_hrs > 0 else 0
+        roi_data[plat] = {'manual': manual_hrs, 'auto': auto_hrs, 'saved': saved_hrs, 'reduction': reduction}
+
+    total_manual = round(sum(d['manual'] for d in roi_data.values()), 1)
+    total_auto = sum(d['auto'] for d in roi_data.values())
+    total_saved = round(total_manual - total_auto, 1)
+    total_reduction = round(total_saved / total_manual * 100) if total_manual > 0 else 0
+
+    rows.append(_section_title_row('Automation ROI', NC))
+    merges.append({'startRowIndex': len(rows) - 1, 'endRowIndex': len(rows), 'startColumnIndex': 0, 'endColumnIndex': NC})
+
+    # ROI KPI boxes - number row
+    r = len(rows)
+    rows.append([
+        make_cell(f'~{int(total_manual)} hrs', bg=DARK_BG, fg=KPI_BLUE, bold=True, font_size=24, halign='CENTER',
+                  note=f'Calculated as total_verifications x 2.5 min per verification. Industry standard for UI automation: 1-5 min per manual check, 2.5 min is conservative.'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'~{int(total_auto)} hrs', bg=DARK_BG, fg=KPI_GREEN, bold=True, font_size=24, halign='CENTER',
+                  note=f'Based on CI regression run durations: Web ~4hrs, Android ~3hrs, iOS ~2hrs'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'~{int(total_saved)} hrs', bg=DARK_BG, fg=KPI_PURPLE, bold=True, font_size=24, halign='CENTER',
+                  note='Manual effort minus automated time per regression cycle'),
+        make_cell('', bg=DARK_BG),
+        make_cell(f'{total_reduction}%', bg=DARK_BG, fg=KPI_AMBER, bold=True, font_size=24, halign='CENTER',
+                  note='Percentage of manual effort eliminated by automation'),
+        make_cell('', bg=DARK_BG),
+    ])
+    # Label row
+    rows.append([
+        make_cell('Manual Effort', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Automated Time', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Time Saved', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('Reduction', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+    ])
+    # Subtitle row for ROI boxes
+    rows.append([
+        make_cell('(all platforms)', bg=DARK_BG, fg=LABEL_GRAY, font_size=9, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('(CI parallel)', bg=DARK_BG, fg=LABEL_GRAY, font_size=9, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('per cycle', bg=DARK_BG, fg=LABEL_GRAY, font_size=9, halign='CENTER'),
+        make_cell('', bg=DARK_BG),
+        make_cell('', bg=DARK_BG),
+        make_cell('', bg=DARK_BG),
+    ])
+    # Merges for ROI KPI boxes: 3 rows x 2 cols each
+    for col_start in [0, 2, 4, 6]:
+        for row_off in range(3):
+            merges.append({'startRowIndex': r + row_off, 'endRowIndex': r + row_off + 1, 'startColumnIndex': col_start, 'endColumnIndex': col_start + 2})
+
+    # Blank row
+    rows.append(build_empty_row(NC))
+
+    # Per-platform breakdown table
+    rows.append([header_cell('Platform'), header_cell('Manual'), header_cell('Automated'),
+                 header_cell('Saved'), header_cell('Reduction'), empty_cell(), empty_cell(), empty_cell()])
+    for i, plat in enumerate(['Web', 'Android', 'iOS']):
+        d = roi_data[plat]
+        rows.append(build_data_row([
+            plat, f'{d["manual"]} hrs', f'{d["auto"]} hrs', f'{d["saved"]} hrs', f'{d["reduction"]}%',
+            '', '', ''
+        ], alt=(i % 2 == 1)))
+    rows.append(build_total_row([
+        'Total', f'{total_manual} hrs', f'{total_auto} hrs', f'{total_saved} hrs', f'{total_reduction}%',
+        '', '', ''
+    ]))
+
+    # Spacing before section
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+
+    # ---- SECTION 4: MODULE COVERAGE HEATMAP ----
+    print('    Section 4: Module Coverage Heatmap...')
+    rows.append(_section_title_row('Module Coverage Map', NC,
+                note='Coverage density per module per platform. \u25cf\u25cf\u25cf = 100+ verifications (high), \u25cf\u25cf = 21-99 (medium), \u25cf = 1-20 (low), \u2014 = no coverage (gap)'))
+    merges.append({'startRowIndex': len(rows) - 1, 'endRowIndex': len(rows), 'startColumnIndex': 0, 'endColumnIndex': NC})
+
+    # Header
+    rows.append([header_cell('Module'), header_cell('Web'), header_cell('Android'), header_cell('iOS'),
+                 empty_cell(), empty_cell(), empty_cell(), empty_cell()])
+
+    # Collect all unique modules
+    all_modules = sorted(set(list(web.keys()) + list(android.keys()) + list(ios.keys())))
+    platform_data = {'Web': web, 'Android': android, 'iOS': ios}
+
+    for idx, mod in enumerate(all_modules):
+        row_cells = [make_cell(mod, bold=True, font_size=10, bg=ALT_ROW_BG if idx % 2 == 1 else None)]
+        for plat in ['Web', 'Android', 'iOS']:
+            pdata = platform_data[plat]
+            if mod in pdata:
+                count = len(pdata[mod]['assertions'])
+            else:
+                count = 0
+            if count >= 100:
+                row_cells.append(make_cell('\u25cf\u25cf\u25cf', bg=HEATMAP_HIGH_BG, bold=True, font_size=10, halign='CENTER'))
+            elif count >= 21:
+                row_cells.append(make_cell('\u25cf\u25cf', bg=HEATMAP_MED_BG, bold=True, font_size=10, halign='CENTER'))
+            elif count >= 1:
+                row_cells.append(make_cell('\u25cf', bg=HEATMAP_LOW_BG, bold=True, font_size=10, halign='CENTER'))
+            else:
+                row_cells.append(make_cell('\u2014', bg=HEATMAP_NONE_BG, fg=HEATMAP_NONE_FG, font_size=10, halign='CENTER'))
+        row_cells += [empty_cell() for _ in range(4)]
+        rows.append(row_cells)
+
+    # Spacing before section
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+
+    # ---- SECTION 5: PLATFORM MATURITY ----
+    print('    Section 5: Platform Maturity...')
+    rows.append(_section_title_row('Platform Maturity', NC,
+                note='Maturity score based on: module coverage breadth (50%), verification depth per module (40%), and production suite presence (10%)'))
+    merges.append({'startRowIndex': len(rows) - 1, 'endRowIndex': len(rows), 'startColumnIndex': 0, 'endColumnIndex': NC})
+
+    prod_platforms = {'Web': False, 'Android': len(android_prod) > 0, 'iOS': len(ios_prod) > 0}
+    for i, plat in enumerate(['Web', 'Android', 'iOS']):
+        pdata = platform_data[plat]
+        mod_count = len(pdata)
+        module_coverage = mod_count / TOTAL_KNOWN_MODULES if TOTAL_KNOWN_MODULES > 0 else 0
+        avg_verifs = (platform_verifs[plat] / mod_count) if mod_count > 0 else 0
+        verification_depth = min(avg_verifs / 100, 1.0)
+        prod_bonus = 0.1 if prod_platforms[plat] else 0
+        maturity = min((module_coverage * 0.5 + verification_depth * 0.4 + prod_bonus) * 100, 100)
+        maturity_int = int(round(maturity))
+
+        filled = maturity_int // 4
+        empty_blocks = 25 - filled
+        bar_str = '\u2588' * filled + '\u2591' * empty_blocks
+
+        if maturity_int >= 70:
+            label = 'MATURE'
+            label_fg = MATURE_GREEN
+        elif maturity_int >= 40:
+            label = 'GROWING'
+            label_fg = GROWING_AMBER
+        else:
+            label = 'EARLY'
+            label_fg = EARLY_PURPLE
+
+        rows.append([
+            make_cell(plat, bold=True, font_size=10, bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(bar_str, font_size=10, font_family='Courier New', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(f'{maturity_int}%', bold=True, font_size=10, halign='RIGHT', bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell(label, bold=True, font_size=10, fg=label_fg, bg=ALT_ROW_BG if i % 2 == 1 else None),
+            make_cell('', bg=ALT_ROW_BG if i % 2 == 1 else None),
+        ])
+        # Merge B-E for bar
+        r = len(rows) - 1
+        merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 1, 'endColumnIndex': 5})
+
+    # Spacing before section
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+    rows.append(build_empty_row(NC))
+
+    # ---- SECTION 6: ASSUMPTIONS & METHODOLOGY ----
+    print('    Section 6: Assumptions & Methodology...')
+    rows.append(_section_title_row('Assumptions & Methodology', NC))
+    merges.append({'startRowIndex': len(rows) - 1, 'endRowIndex': len(rows), 'startColumnIndex': 0, 'endColumnIndex': NC})
+
+    # Header
+    rows.append([header_cell('Parameter'), header_cell('Value'), header_cell(''), header_cell(''),
+                 header_cell('Source'), header_cell(''), header_cell(''), header_cell('')])
+    # Merge Value cols (B-D) and Source cols (E-H)
+    r = len(rows) - 1
+    merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 1, 'endColumnIndex': 4})
+    merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 4, 'endColumnIndex': 8})
+
+    assumptions = [
+        ('Manual verification time', '2.5 min per check', 'Industry standard (conservative). Range: 1-5 min depending on complexity'),
+        ('Web CI regression time', '~4 hours', 'Based on Novo-P1-UI-Tests GitHub Actions run history'),
+        ('Android CI regression time', '~3 hours', 'Estimated based on Appium mobile test execution benchmarks'),
+        ('iOS CI regression time', '~2 hours', 'Estimated based on Appium mobile test execution benchmarks'),
+        ('Verification types counted', 'isElementPresent, assertEquals, verifyElementText, assertTrue, assertFalse', 'Extracted via regex from Java test files + Page Object deep scan'),
+        ('Excluded from count', 'Assert.fail (error handlers), waitForElement (pre-conditions)', 'These are not actual test verifications'),
+        ('Module detection', 'Folder-based (e.g. tests/Web/Cards/ \u2192 Cards)', 'Auto-detected from repository structure'),
+        ('Login deduplication', 'Login verifications counted once globally', 'Prevents inflation from login steps repeated in every test'),
+    ]
+    for i, (param, value, source) in enumerate(assumptions):
+        bg = ALT_ROW_BG if i % 2 == 1 else None
+        rows.append([
+            make_cell(param, font_size=10, bold=True, bg=bg, wrap_strategy='WRAP'),
+            make_cell(value, font_size=10, bg=bg, wrap_strategy='WRAP'),
+            make_cell('', bg=bg), make_cell('', bg=bg),
+            make_cell(source, font_size=10, bg=bg, wrap_strategy='WRAP'),
+            make_cell('', bg=bg), make_cell('', bg=bg), make_cell('', bg=bg),
+        ])
+        r = len(rows) - 1
+        merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 1, 'endColumnIndex': 4})
+        merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 4, 'endColumnIndex': 8})
+
+    col_widths = [160, 100, 110, 120, 130, 100, 120, 120]
+    return rows, col_widths, 4, merges  # freeze_rows=4
 
 
 def build_platform_summary(name, data, ts):
@@ -519,98 +862,58 @@ def build_verification_types(web, android, ios, android_prod, ios_prod, ts):
     return rows, col_widths, 3
 
 
-# ==================== CHARTS ====================
+def hide_gridlines(spreadsheet, ws):
+    """Hide gridlines on a sheet for cleaner look."""
+    try:
+        spreadsheet.batch_update({'requests': [{
+            'updateSheetProperties': {
+                'properties': {'sheetId': ws.id, 'gridProperties': {'hideGridlines': True}},
+                'fields': 'gridProperties.hideGridlines'
+            }
+        }]})
+    except Exception as e:
+        print(f'  Gridlines warning: {e}')
 
-def add_charts(spreadsheet, ws, vt_header_row, vt_total_row):
-    """Add a single stacked bar chart using the Verification Types table in Grand Summary.
-    vt_header_row: row index of the Verification Types header row
-    vt_total_row: row index of the TOTAL row at the end of the table
-    The data rows are between header+1 and total (exclusive).
-    Columns: 0=Type, 1=Web, 2=Android, 3=iOS, 4=Prod
-    """
+
+def remove_charts(spreadsheet, ws):
+    """Remove any existing chart objects from a sheet."""
     sid = ws.id
     try:
-        # Delete existing charts
         meta = spreadsheet.fetch_sheet_metadata()
-        existing_charts = []
         for s in meta.get('sheets', []):
             if s['properties']['sheetId'] == sid:
-                existing_charts = [c['chartId'] for c in s.get('charts', [])]
-        for cid in existing_charts:
-            spreadsheet.batch_update({'requests': [{'deleteEmbeddedObject': {'objectId': cid}}]})
-
-        # Data rows are from vt_header_row+1 to vt_total_row (exclusive of TOTAL)
-        data_start = vt_header_row + 1
-        data_end = vt_total_row  # exclusive — don't include the TOTAL row
-
-        # Stacked bar chart: Y-axis = verification types, segments = platforms (Web, Android, iOS, Prod)
-        # Column 0 = Type names (domain), Columns 1-4 = Web, Android, iOS, Prod (series)
-        series_colors = [
-            {'red': 0.23, 'green': 0.51, 'blue': 0.96},  # Web - blue
-            {'red': 0.16, 'green': 0.71, 'blue': 0.36},   # Android - green
-            {'red': 0.96, 'green': 0.62, 'blue': 0.04},   # iOS - amber
-            {'red': 0.61, 'green': 0.15, 'blue': 0.69},   # Prod - purple
-        ]
-        platform_cols = [1, 2, 3, 4]  # Web, Android, iOS, Prod
-        platform_names = ['Web', 'Android', 'iOS', 'Prod']
-
-        series = []
-        for idx, col in enumerate(platform_cols):
-            series.append({
-                'series': {
-                    'sourceRange': {
-                        'sources': [{
-                            'sheetId': sid,
-                            'startRowIndex': data_start,
-                            'endRowIndex': data_end,
-                            'startColumnIndex': col,
-                            'endColumnIndex': col + 1
-                        }]
-                    }
-                },
-                'color': series_colors[idx],
-            })
-
-        requests = [
-            {'addChart': {'chart': {
-                'spec': {
-                    'title': 'Verifications by Platform and Type',
-                    'basicChart': {
-                        'chartType': 'BAR',
-                        'legendPosition': 'BOTTOM_LEGEND',
-                        'stackedType': 'STACKED',
-                        'headerCount': 0,
-                        'axis': [
-                            {'position': 'BOTTOM_AXIS', 'title': 'Count'},
-                            {'position': 'LEFT_AXIS', 'title': ''}
-                        ],
-                        'domains': [{
-                            'domain': {
-                                'sourceRange': {
-                                    'sources': [{
-                                        'sheetId': sid,
-                                        'startRowIndex': data_start,
-                                        'endRowIndex': data_end,
-                                        'startColumnIndex': 0,
-                                        'endColumnIndex': 1
-                                    }]
-                                }
-                            }
-                        }],
-                        'series': series,
-                    }
-                },
-                'position': {'overlayPosition': {
-                    'anchorCell': {'sheetId': sid, 'rowIndex': 0, 'columnIndex': 7},
-                    'widthPixels': 600,
-                    'heightPixels': 400
-                }}
-            }}}
-        ]
-        spreadsheet.batch_update({'requests': requests})
-        print('  Stacked bar chart added successfully')
+                for c in s.get('charts', []):
+                    spreadsheet.batch_update({'requests': [{'deleteEmbeddedObject': {'objectId': c['chartId']}}]})
     except Exception as e:
-        print(f'  Chart warning: {e}')
+        print(f'  Chart removal warning: {e}')
+
+
+def apply_merges(spreadsheet, ws, merges):
+    """Apply cell merge requests to a sheet."""
+    if not merges:
+        return
+    sid = ws.id
+    requests = []
+    for m in merges:
+        requests.append({
+            'mergeCells': {
+                'range': {
+                    'sheetId': sid,
+                    'startRowIndex': m['startRowIndex'],
+                    'endRowIndex': m['endRowIndex'],
+                    'startColumnIndex': m['startColumnIndex'],
+                    'endColumnIndex': m['endColumnIndex'],
+                },
+                'mergeType': 'MERGE_ALL'
+            }
+        })
+    # Send in batches
+    batch_size = 30
+    for i in range(0, len(requests), batch_size):
+        batch = requests[i:i + batch_size]
+        spreadsheet.batch_update({'requests': batch})
+        if i + batch_size < len(requests):
+            time.sleep(0.5)
 
 
 # ==================== CLEAN EXISTING SHEETS ====================
@@ -700,9 +1003,12 @@ def main():
 
     # --- Grand Summary ---
     print('  1/12 Grand Summary...')
-    gs_rows, gs_widths, gs_freeze, vt_header_row, vt_total_row = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
+    gs_rows, gs_widths, gs_freeze, gs_merges = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, grand_ws, gs_rows, gs_widths, gs_freeze)
     print(f'    {len(gs_rows)} rows written')
+    print(f'    Applying {len(gs_merges)} cell merges...')
+    apply_merges(ss, grand_ws, gs_merges)
+    print('    Merges applied')
     time.sleep(1)
 
     # --- Web Summary ---
@@ -764,14 +1070,16 @@ def main():
     print(f'    {len(r)} rows written')
     time.sleep(0.5)
 
-    # Step 4: Charts
-    print('\n[4/4] Adding charts to Grand Summary...')
+    # Step 4: Clean up Grand Summary
+    print('\n[4/4] Cleaning up Grand Summary...')
     grand_ws = ss.worksheet('Grand Summary')
-    add_charts(ss, grand_ws, vt_header_row, vt_total_row)
+    remove_charts(ss, grand_ws)
+    hide_gridlines(ss, grand_ws)
+    print('  Removed old charts, hidden gridlines.')
 
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
-    print(f'DONE! All 12 sheets rebuilt with verifications + pre-conditions in {elapsed:.1f}s')
+    print(f'DONE! All 12 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
     print(f'Sheet: https://docs.google.com/spreadsheets/d/{SHEET_ID}')
     print(f'{"=" * 60}')
 
