@@ -12,10 +12,24 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # ==================== CONFIG ====================
-WEB_REPO = os.environ.get('WEB_REPO_PATH', '/Users/kawal/Research/QE/Novo-P1-UI-Tests')
-MOBILE_REPO = os.environ.get('MOBILE_REPO_PATH', '/Users/kawal/Research/QE/Novo_Mobile_UIAutomation_Appium')
-CREDS_PATH = os.environ.get('GOOGLE_SHEETS_CREDS', '/Users/kawal/Research/QE/.secrets/google-sheets-creds.json')
-SHEET_ID = os.environ.get('NEXUS_SHEET_ID', '1QqQzDIfZ4RWRfqYOmy2YnfJCF1inGn7rhp2a6CiEdv8')
+WEB_REPO = os.environ.get('WEB_REPO_PATH', '')
+MOBILE_REPO = os.environ.get('MOBILE_REPO_PATH', '')
+CREDS_PATH = os.environ.get('GOOGLE_SHEETS_CREDS', '')
+SHEET_ID = os.environ.get('NEXUS_SHEET_ID', '')
+
+if not SHEET_ID:
+    # Local development fallback — load from .env file if exists
+    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(env_file):
+        with open(env_file) as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.strip().split('=', 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+        WEB_REPO = os.environ.get('WEB_REPO_PATH', '')
+        MOBILE_REPO = os.environ.get('MOBILE_REPO_PATH', '')
+        CREDS_PATH = os.environ.get('GOOGLE_SHEETS_CREDS', '')
+        SHEET_ID = os.environ.get('NEXUS_SHEET_ID', '')
 
 ASSERTION_PATTERNS = [
     (r'Assert\.assertEquals\s*\(', 'assertEquals'),
@@ -264,6 +278,10 @@ def post_process_modules(modules):
                 a_copy['type'] = 'Pre-condition'
                 new_preconditions.append(a_copy)
                 new_types['Pre-condition'] = new_types.get('Pre-condition', 0) + 1
+                continue
+
+            # Step 1b: Exclude Assert.fail (catch-all error handlers, not real verifications)
+            if a['type'] == 'Assert.fail':
                 continue
 
             # Step 2: Deduplicate login verifications
