@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-NEXUS Sheet Rebuild - writes data + formatting in a single updateCells request per sheet.
+NEXUS Sheet Rebuild v2 - writes data + formatting in a single updateCells request per sheet.
 Uses gspread for sheet management, raw batchUpdate API for cell data+format together.
+Terminology: Verifications (not Assertions), Test Scripts (not Test Files), Pre-conditions.
 """
 
 import os, sys, json, time, warnings
@@ -13,7 +14,7 @@ warnings.filterwarnings('ignore')
 # Add scripts dir to path so we can import nexus_scan
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nexus_scan import (
-    scan_repo, WEB_REPO, MOBILE_REPO, CREDS_PATH, SHEET_ID,
+    scan_repo, post_process_modules, WEB_REPO, MOBILE_REPO, CREDS_PATH, SHEET_ID,
     TYPE_COLORS, HEADER_COLOR, TOTAL_COLOR
 )
 
@@ -40,6 +41,8 @@ TYPE_FORMAT_MAP = {
     'isElementPresent':  {'bg': rgb_dict(0.859, 0.922, 0.980), 'fg': rgb_dict(0.118, 0.251, 0.686)},
     'verifyElementText': {'bg': rgb_dict(0.812, 0.984, 0.984), 'fg': rgb_dict(0.082, 0.369, 0.459)},
     'waitForElement':    {'bg': rgb_dict(0.996, 0.953, 0.780), 'fg': rgb_dict(0.573, 0.251, 0.055)},
+    'Pre-condition':     {'bg': rgb_dict(0.930, 0.930, 0.930), 'fg': rgb_dict(0.450, 0.450, 0.450)},
+    'Pre-condition (waitForElement)': {'bg': rgb_dict(0.930, 0.930, 0.930), 'fg': rgb_dict(0.450, 0.450, 0.450)},
     'Assert.fail':       {'bg': rgb_dict(0.996, 0.886, 0.886), 'fg': rgb_dict(0.600, 0.106, 0.106)},
 }
 
@@ -119,6 +122,26 @@ def total_cell(value):
 
 def empty_cell():
     return make_cell('')
+
+# Verification count color bars: green (>100), blue (50-99), amber (20-49), gray (<20)
+VERIF_COLOR_BARS = {
+    'green': {'bg': rgb_dict(0.820, 0.980, 0.898), 'fg': rgb_dict(0.024, 0.373, 0.275)},
+    'blue':  {'bg': rgb_dict(0.859, 0.922, 0.980), 'fg': rgb_dict(0.118, 0.251, 0.686)},
+    'amber': {'bg': rgb_dict(0.996, 0.953, 0.780), 'fg': rgb_dict(0.573, 0.251, 0.055)},
+    'gray':  {'bg': rgb_dict(0.930, 0.930, 0.930), 'fg': rgb_dict(0.450, 0.450, 0.450)},
+}
+
+def verif_count_cell(count, alt=False):
+    """Data cell with color bar based on verification count."""
+    if count >= 100:
+        colors = VERIF_COLOR_BARS['green']
+    elif count >= 50:
+        colors = VERIF_COLOR_BARS['blue']
+    elif count >= 20:
+        colors = VERIF_COLOR_BARS['amber']
+    else:
+        colors = VERIF_COLOR_BARS['gray']
+    return make_cell(count, bg=colors['bg'], fg=colors['fg'], bold=True, font_size=10, halign='RIGHT')
 
 # ==================== BUILD ROW HELPERS ====================
 
@@ -241,57 +264,78 @@ def get_or_create(ss, title, rows=2000, cols=20):
 
 # ==================== SHEET BUILDERS ====================
 
+def _count_verifications(data):
+    return sum(len(m['assertions']) for m in data.values())
+
+def _count_preconditions(data):
+    return sum(len(m.get('preconditions', [])) for m in data.values())
+
 def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     """Build all rows for Grand Summary sheet."""
-    web_t = sum(len(m['assertions']) for m in web.values())
-    and_t = sum(len(m['assertions']) for m in android.values())
-    ios_t = sum(len(m['assertions']) for m in ios.values())
-    andp_t = sum(len(m['assertions']) for m in android_prod.values())
-    iosp_t = sum(len(m['assertions']) for m in ios_prod.values())
-    grand = web_t + and_t + ios_t + andp_t + iosp_t
+    web_v = _count_verifications(web)
+    and_v = _count_verifications(android)
+    ios_v = _count_verifications(ios)
+    andp_v = _count_verifications(android_prod)
+    iosp_v = _count_verifications(ios_prod)
+    web_p = _count_preconditions(web)
+    and_p = _count_preconditions(android)
+    ios_p = _count_preconditions(ios)
+    andp_p = _count_preconditions(android_prod)
+    iosp_p = _count_preconditions(ios_prod)
+    grand_v = web_v + and_v + ios_v + andp_v + iosp_v
+    grand_p = web_p + and_p + ios_p + andp_p + iosp_p
 
-    NC = 6  # num cols
+    NC = 7  # num cols (added Pre-conditions)
     rows = []
-    rows.append(build_title_row('NEXUS Assertion Registry', NC))
+    # Row 1: Title
+    rows.append(build_title_row('NEXUS Verification Registry', NC))
+    # Row 2: Timestamp
     rows.append(build_subtitle_row(f'Last scanned: {ts}', NC))
+    # Row 3: blank
     rows.append(build_empty_row(NC))
-    rows.append(build_header_row(['Platform', 'Modules', 'Test Files', 'Assertions', 'Prod Suites', 'Total']))
-    rows.append(build_data_row(['Web', len(web), sum(len(m['files']) for m in web.values()), web_t, 0, web_t], alt=False))
-    rows.append(build_data_row(['Android', len(android), sum(len(m['files']) for m in android.values()), and_t, andp_t, and_t + andp_t], alt=True))
-    rows.append(build_data_row(['iOS', len(ios), sum(len(m['files']) for m in ios.values()), ios_t, iosp_t, ios_t + iosp_t], alt=False))
+    # Row 4: Header
+    rows.append(build_header_row(['Platform', 'Modules', 'Test Scripts', 'Verifications', 'Pre-conditions', 'Total', 'Prod Suites']))
+    # Rows 5-7: Platform data
+    rows.append(build_data_row(['Web', len(web), sum(len(m['files']) for m in web.values()), web_v, web_p, web_v + web_p, 0], alt=False))
+    rows.append(build_data_row(['Android', len(android), sum(len(m['files']) for m in android.values()), and_v, and_p, and_v + and_p, andp_v], alt=True))
+    rows.append(build_data_row(['iOS', len(ios), sum(len(m['files']) for m in ios.values()), ios_v, ios_p, ios_v + ios_p, iosp_v], alt=False))
+    # Row 8: TOTAL
     rows.append(build_total_row(['TOTAL', len(web)+len(android)+len(ios),
                                   sum(len(m['files']) for d in [web,android,ios] for m in d.values()),
-                                  web_t+and_t+ios_t, andp_t+iosp_t, grand]))
+                                  web_v+and_v+ios_v, web_p+and_p+ios_p, grand_v+grand_p, andp_v+iosp_v]))
+    # Row 9: blank
     rows.append(build_empty_row(NC))
 
-    # Assertion types table
-    rows.append(build_header_row(['Assertion Types', 'Web', 'Android', 'iOS', 'Prod', 'Total']))
+    # Row 10: Verification Types header
+    rows.append(build_header_row(['Verification Types', 'Web', 'Android', 'iOS', 'Prod', 'Total', '']))
     all_types = sorted(set(t for d in [web,android,ios,android_prod,ios_prod] for m in d.values() for t in m['types']))
+    # Rename 'waitForElement' display and handle Pre-condition
     for i, t in enumerate(all_types):
+        display_name = 'Pre-condition (waitForElement)' if t == 'Pre-condition' else t
         wc = sum(m['types'].get(t,0) for m in web.values())
         ac = sum(m['types'].get(t,0) for m in android.values())
         ic = sum(m['types'].get(t,0) for m in ios.values())
         pc = sum(m['types'].get(t,0) for d in [android_prod,ios_prod] for m in d.values())
-        rows.append(build_data_row([t, wc, ac, ic, pc, wc+ac+ic+pc], alt=(i % 2 == 1), type_col=0))
-    rows.append(build_total_row(['TOTAL', web_t, and_t, ios_t, andp_t+iosp_t, grand]))
+        rows.append(build_data_row([display_name, wc, ac, ic, pc, wc+ac+ic+pc, ''], alt=(i % 2 == 1), type_col=0))
+    rows.append(build_total_row(['TOTAL', web_v+web_p, and_v+and_p, ios_v+ios_p, andp_v+iosp_v+andp_p+iosp_p, grand_v+grand_p, '']))
 
     rows.append(build_empty_row(NC))
 
     # Chart data - platform distribution
     rows.append(build_subtitle_row('Platform Distribution (chart data)', NC))
-    rows.append(build_header_row(['Platform', 'Assertions', '', '', '', '']))
-    chart_start = len(rows)  # 0-indexed row where chart data starts
-    rows.append(build_data_row(['Web', web_t, '', '', '', ''], alt=False))
-    rows.append(build_data_row(['Android', and_t, '', '', '', ''], alt=True))
-    rows.append(build_data_row(['iOS', ios_t, '', '', '', ''], alt=False))
-    rows.append(build_data_row(['Android Prod', andp_t, '', '', '', ''], alt=True))
-    rows.append(build_data_row(['iOS Prod', iosp_t, '', '', '', ''], alt=False))
+    rows.append(build_header_row(['Platform', 'Verifications', '', '', '', '', '']))
+    chart_start = len(rows)
+    rows.append(build_data_row(['Web', web_v, '', '', '', '', ''], alt=False))
+    rows.append(build_data_row(['Android', and_v, '', '', '', '', ''], alt=True))
+    rows.append(build_data_row(['iOS', ios_v, '', '', '', '', ''], alt=False))
+    rows.append(build_data_row(['Android Prod', andp_v, '', '', '', '', ''], alt=True))
+    rows.append(build_data_row(['iOS Prod', iosp_v, '', '', '', '', ''], alt=False))
 
     rows.append(build_empty_row(NC))
 
     # Chart data - top modules
     rows.append(build_subtitle_row('Top 15 Modules (chart data)', NC))
-    rows.append(build_header_row(['Module', 'Platform', 'Assertions', '', '', '']))
+    rows.append(build_header_row(['Module', 'Platform', 'Verifications', '', '', '', '']))
     mod_start = len(rows)
     all_mods = []
     for n, m in web.items(): all_mods.append((n, 'Web', len(m['assertions'])))
@@ -299,49 +343,65 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     for n, m in ios.items(): all_mods.append((n, 'iOS', len(m['assertions'])))
     all_mods.sort(key=lambda x: -x[2])
     for i, (mod, plat, cnt) in enumerate(all_mods[:15]):
-        rows.append(build_data_row([mod, plat, cnt, '', '', ''], alt=(i % 2 == 1)))
+        rows.append(build_data_row([mod, plat, cnt, '', '', '', ''], alt=(i % 2 == 1)))
 
-    col_widths = [160, 100, 100, 120, 120, 120]
+    col_widths = [160, 100, 110, 120, 130, 100, 120]
     return rows, col_widths, 4, chart_start, mod_start  # freeze_rows=4
 
 
 def build_platform_summary(name, data, ts):
     """Build rows for a platform summary sheet."""
-    headers = ['Module', 'Test Files', 'Assertions', 'isElementPresent', 'assertEquals',
-               'verifyElementText', 'waitForElement', 'assertTrue/False', 'Assert.fail', 'Other']
+    headers = ['Module', 'Test Scripts', 'Verifications', 'Pre-conditions', 'isElementPresent', 'assertEquals',
+               'verifyElementText', 'assertTrue/False', 'Assert.fail', 'Other', '% of Total']
     NC = len(headers)
     rows = []
     rows.append(build_title_row(name, NC))
     rows.append(build_subtitle_row(f'Scanned: {ts}', NC))
     rows.append(build_header_row(headers))
 
+    # Compute total verifications for % of Total
+    total_verifs = sum(len(m['assertions']) for m in data.values())
+
     data_rows = []
     for mn in sorted(data.keys()):
         m = data[mn]; ty = m['types']
+        verif_count = len(m['assertions'])
+        precond_count = len(m.get('preconditions', []))
+        pct = round(verif_count / total_verifs * 100, 1) if total_verifs > 0 else 0
         data_rows.append([
-            mn, len(m['files']), len(m['assertions']),
+            mn, len(m['files']), verif_count, precond_count,
             ty.get('isElementPresent', 0), ty.get('assertEquals', 0),
-            ty.get('verifyElementText', 0), ty.get('waitForElement', 0),
+            ty.get('verifyElementText', 0),
             ty.get('assertTrue', 0) + ty.get('assertFalse', 0),
             ty.get('Assert.fail', 0),
-            sum(v for k, v in ty.items() if k not in ('isElementPresent', 'assertEquals', 'verifyElementText', 'waitForElement', 'assertTrue', 'assertFalse', 'Assert.fail'))
+            sum(v for k, v in ty.items() if k not in ('isElementPresent', 'assertEquals', 'verifyElementText', 'Pre-condition', 'assertTrue', 'assertFalse', 'Assert.fail')),
+            f'{pct}%'
         ])
     for i, dr in enumerate(data_rows):
-        rows.append(build_data_row(dr, alt=(i % 2 == 1)))
+        # Build row but replace verifications cell with color-bar version
+        row_cells = []
+        for j, v in enumerate(dr):
+            if j == 2:  # Verifications column
+                row_cells.append(verif_count_cell(v, alt=(i % 2 == 1)))
+            else:
+                row_cells.append(data_cell(v, alt=(i % 2 == 1)))
+        rows.append(row_cells)
 
     # Totals
-    totals = ['TOTAL', sum(len(m['files']) for m in data.values()), sum(len(m['assertions']) for m in data.values())]
-    for c in range(3, 10):
-        totals.append(sum(dr[c] for dr in data_rows if len(dr) > c))
+    total_precond = sum(len(m.get('preconditions', [])) for m in data.values())
+    totals = ['TOTAL', sum(len(m['files']) for m in data.values()), total_verifs, total_precond]
+    for c in range(4, 10):
+        totals.append(sum(dr[c] for dr in data_rows if len(dr) > c and isinstance(dr[c], (int, float))))
+    totals.append('100%')
     rows.append(build_total_row(totals))
 
-    col_widths = [180, 90, 100, 130, 110, 130, 120, 120, 100, 80]
+    col_widths = [180, 100, 120, 120, 130, 110, 130, 120, 100, 80, 90]
     return rows, col_widths, 3
 
 
 def build_detail_sheet(sheet_name, data, ts, max_rows=None):
-    """Build rows for a detail assertions sheet."""
-    headers = ['Test File', 'Module', 'Number', 'Assertion', 'Type']
+    """Build rows for a detail verifications sheet. Pre-conditions are excluded."""
+    headers = ['Test Script', 'Module', 'Number', 'Verification', 'Type']
     NC = len(headers)
     rows = []
     rows.append(build_title_row(sheet_name, NC))
@@ -350,12 +410,20 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
 
     num = 1
     for mn in sorted(data.keys()):
+        # Only show actual verifications — exclude pre-conditions
         for a in data[mn].get('assertions', []):
-            rows.append(build_data_row(
-                [a.get('file', ''), mn, num, a['description'], a['type']],
-                alt=((num - 1) % 2 == 1),
-                type_col=4
-            ))
+            if a.get('type') == 'Pre-condition':
+                continue  # Skip pre-conditions in detail sheets
+            # Build row with bold description
+            row_cells = [
+                data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
+                data_cell(mn, alt=((num - 1) % 2 == 1)),
+                data_cell(num, alt=((num - 1) % 2 == 1)),
+                make_cell(a['description'], bold=True, font_size=10,
+                          bg=ALT_ROW_BG if (num - 1) % 2 == 1 else None),
+                data_cell(a['type'], alt=((num - 1) % 2 == 1), type_val=a['type']),
+            ]
+            rows.append(row_cells)
             num += 1
             if max_rows and num - 1 >= max_rows:
                 break
@@ -368,7 +436,7 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
 
 def build_prod_suites(android_prod, ios_prod, ts):
     """Build rows for Production Suites sheet."""
-    headers = ['Suite', 'Platform', 'Test Files', 'Assertions']
+    headers = ['Suite', 'Platform', 'Test Scripts', 'Verifications']
     NC = len(headers)
     rows = []
     rows.append(build_title_row('Production Suites', NC))
@@ -393,33 +461,34 @@ def build_prod_suites(android_prod, ios_prod, ts):
     return rows, col_widths, 3
 
 
-def build_assertion_types(web, android, ios, android_prod, ios_prod, ts):
-    """Build rows for Assertion Types sheet."""
+def build_verification_types(web, android, ios, android_prod, ios_prod, ts):
+    """Build rows for Verification Types sheet."""
     headers = ['Type', 'Web', 'Android', 'iOS', 'Prod', 'Total']
     NC = len(headers)
     rows = []
-    rows.append(build_title_row('Assertion Types Cross-Platform', NC))
+    rows.append(build_title_row('Verification Types Cross-Platform', NC))
     rows.append(build_subtitle_row(f'Scanned: {ts}', NC))
     rows.append(build_header_row(headers))
 
-    web_t = sum(len(m['assertions']) for m in web.values())
-    and_t = sum(len(m['assertions']) for m in android.values())
-    ios_t = sum(len(m['assertions']) for m in ios.values())
-    andp_t = sum(len(m['assertions']) for m in android_prod.values())
-    iosp_t = sum(len(m['assertions']) for m in ios_prod.values())
+    web_t = _count_verifications(web) + _count_preconditions(web)
+    and_t = _count_verifications(android) + _count_preconditions(android)
+    ios_t = _count_verifications(ios) + _count_preconditions(ios)
+    andp_t = _count_verifications(android_prod) + _count_preconditions(android_prod)
+    iosp_t = _count_verifications(ios_prod) + _count_preconditions(ios_prod)
     grand = web_t + and_t + ios_t + andp_t + iosp_t
 
     all_types = sorted(set(t for d in [web, android, ios, android_prod, ios_prod] for m in d.values() for t in m['types']))
     for i, t in enumerate(all_types):
+        display_name = 'Pre-condition (waitForElement)' if t == 'Pre-condition' else t
         wc = sum(m['types'].get(t, 0) for m in web.values())
         ac = sum(m['types'].get(t, 0) for m in android.values())
         ic = sum(m['types'].get(t, 0) for m in ios.values())
         pc = sum(m['types'].get(t, 0) for d in [android_prod, ios_prod] for m in d.values())
-        rows.append(build_data_row([t, wc, ac, ic, pc, wc+ac+ic+pc], alt=(i % 2 == 1), type_col=0))
+        rows.append(build_data_row([display_name, wc, ac, ic, pc, wc+ac+ic+pc], alt=(i % 2 == 1), type_col=0))
 
     rows.append(build_total_row(['TOTAL', web_t, and_t, ios_t, andp_t + iosp_t, grand]))
 
-    col_widths = [160, 100, 100, 100, 100, 100]
+    col_widths = [200, 100, 100, 100, 100, 100]
     return rows, col_widths, 3
 
 
@@ -442,7 +511,7 @@ def add_charts(spreadsheet, ws, chart_start, mod_start):
             # Pie chart
             {'addChart': {'chart': {
                 'spec': {
-                    'title': 'Assertions by Platform',
+                    'title': 'Verifications by Platform',
                     'pieChart': {
                         'legendPosition': 'RIGHT_LEGEND',
                         'domain': {'sourceRange': {'sources': [{'sheetId': sid, 'startRowIndex': chart_start, 'endRowIndex': chart_start + 5, 'startColumnIndex': 0, 'endColumnIndex': 1}]}},
@@ -454,7 +523,7 @@ def add_charts(spreadsheet, ws, chart_start, mod_start):
             # Bar chart
             {'addChart': {'chart': {
                 'spec': {
-                    'title': 'Top 15 Modules by Assertions',
+                    'title': 'Top 15 Modules by Verifications',
                     'basicChart': {
                         'chartType': 'BAR',
                         'legendPosition': 'NO_LEGEND',
@@ -504,35 +573,41 @@ def main():
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     print('=' * 60)
-    print('NEXUS Sheet Rebuild - Data + Formatting in One Request')
+    print('NEXUS Sheet Rebuild v2 - Verifications + Pre-conditions')
     print('=' * 60)
     print(f'Time: {ts}')
 
-    # Step 1: Scan repos
+    # Step 1: Scan repos and post-process
     print('\n[1/4] Scanning repositories...')
     print('  Scanning Web repo...')
     web = scan_repo(WEB_REPO, 'src/test/java/tests', 'src/main/java/pages', 'web')
+    web = post_process_modules(web)
     for n in sorted(web):
-        print(f'    {n}: {len(web[n]["files"])} files, {len(web[n]["assertions"])} assertions')
+        print(f'    {n}: {len(web[n]["files"])} scripts, {len(web[n]["assertions"])} verifications, {len(web[n].get("preconditions",[]))} pre-conditions')
 
     print('  Scanning Android...')
     android = scan_repo(MOBILE_REPO, 'src/test/java/tests/android', 'src/main/java/pages/android', 'android')
+    android = post_process_modules(android)
     for n in sorted(android):
-        print(f'    {n}: {len(android[n]["files"])} files, {len(android[n]["assertions"])} assertions')
+        print(f'    {n}: {len(android[n]["files"])} scripts, {len(android[n]["assertions"])} verifications, {len(android[n].get("preconditions",[]))} pre-conditions')
 
     print('  Scanning iOS...')
     ios = scan_repo(MOBILE_REPO, 'src/test/java/tests/iOS', 'src/main/java/pages/iOS', 'ios')
+    ios = post_process_modules(ios)
     for n in sorted(ios):
-        print(f'    {n}: {len(ios[n]["files"])} files, {len(ios[n]["assertions"])} assertions')
+        print(f'    {n}: {len(ios[n]["files"])} scripts, {len(ios[n]["assertions"])} verifications, {len(ios[n].get("preconditions",[]))} pre-conditions')
 
     print('  Scanning Prod suites...')
     android_prod = scan_repo(MOBILE_REPO, 'src/test/java/tests/androidProdSanitySuite', 'src/main/java/pages/android', 'android')
+    android_prod = post_process_modules(android_prod)
     ios_prod = scan_repo(MOBILE_REPO, 'src/test/java/tests/iOSProdSuite', 'src/main/java/pages/iOS', 'ios')
-    print(f'    Android Prod: {sum(len(m["assertions"]) for m in android_prod.values())}')
-    print(f'    iOS Prod: {sum(len(m["assertions"]) for m in ios_prod.values())}')
+    ios_prod = post_process_modules(ios_prod)
+    print(f'    Android Prod: {sum(len(m["assertions"]) for m in android_prod.values())} verifications')
+    print(f'    iOS Prod: {sum(len(m["assertions"]) for m in ios_prod.values())} verifications')
 
-    total = sum(len(m['assertions']) for d in [web, android, ios, android_prod, ios_prod] for m in d.values())
-    print(f'\n  GRAND TOTAL: {total} assertions')
+    total_v = sum(len(m['assertions']) for d in [web, android, ios, android_prod, ios_prod] for m in d.values())
+    total_p = sum(len(m.get('preconditions', [])) for d in [web, android, ios, android_prod, ios_prod] for m in d.values())
+    print(f'\n  GRAND TOTAL: {total_v} verifications + {total_p} pre-conditions')
 
     # Step 2: Connect to Google Sheets and clean
     print('\n[2/4] Connecting to Google Sheets...')
@@ -610,10 +685,10 @@ def main():
         print(f'    {len(r)} rows written')
         time.sleep(0.5)
 
-    # --- Assertion Types ---
-    print('  12/12 Assertion Types...')
-    ws = get_or_create(ss, 'Assertion Types')
-    r, cw, fr = build_assertion_types(web, android, ios, android_prod, ios_prod, ts)
+    # --- Verification Types ---
+    print('  12/12 Verification Types...')
+    ws = get_or_create(ss, 'Verification Types')
+    r, cw, fr = build_verification_types(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, ws, r, cw, fr)
     print(f'    {len(r)} rows written')
     time.sleep(0.5)
@@ -625,7 +700,7 @@ def main():
 
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
-    print(f'DONE! All 12 sheets rebuilt with data + formatting in {elapsed:.1f}s')
+    print(f'DONE! All 12 sheets rebuilt with verifications + pre-conditions in {elapsed:.1f}s')
     print(f'Sheet: https://docs.google.com/spreadsheets/d/{SHEET_ID}')
     print(f'{"=" * 60}')
 

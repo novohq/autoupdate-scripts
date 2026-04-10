@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NEXUS Assertion Scanner v2
-Scans Java test repos for assertions, updates Google Sheets with formatting.
+NEXUS Verification Scanner v2
+Scans Java test repos for verifications + pre-conditions, updates Google Sheets with formatting.
 Usage: python3 nexus_scan.py [--web-only] [--mobile-only] [--dry-run]
 """
 
@@ -41,6 +41,7 @@ TYPE_COLORS = {
     'isElementPresent':  {'bg': (0.86, 0.92, 0.98), 'fg': (0.12, 0.25, 0.50)},  # blue
     'verifyElementText': {'bg': (0.81, 0.98, 0.98), 'fg': (0.08, 0.37, 0.46)},  # cyan
     'waitForElement':    {'bg': (1.00, 0.95, 0.78), 'fg': (0.57, 0.25, 0.05)},  # amber
+    'Pre-condition':     {'bg': (0.93, 0.93, 0.93), 'fg': (0.45, 0.45, 0.45)},  # light gray
     'Assert.fail':       {'bg': (0.99, 0.87, 0.87), 'fg': (0.60, 0.10, 0.10)},  # red
 }
 HEADER_COLOR = {'bg': (0.06, 0.09, 0.16), 'fg': (1.0, 1.0, 1.0)}  # dark navy + white
@@ -86,17 +87,17 @@ def build_description(line, lines, idx, atype, method):
 
     if atype == 'assertEquals':
         m = re.search(r'assertEquals\s*\(\s*(.+?)\s*,\s*(.+?)\s*[,)]', stripped)
-        if m: return f'Verify {clean(m.group(1))} == {clean(m.group(2))}'
+        if m: return f'Verify {clean(m.group(1))} equals {clean(m.group(2))}'
     elif atype in ('isElementPresent', 'waitForElement'):
         m = re.search(r'(?:isElementPresent|waitForElement|waitForVisibility)\s*\(\s*(\w+)', stripped)
-        if m: return f'Verify {camel_to_words(m.group(1))} is visible'
+        if m: return f'Verify {camel_to_words(m.group(1))} is displayed'
         m = re.search(r'\.isDisplayed\s*\(\s*\)', stripped)
         if m:
             var = re.search(r'(\w+)\.isDisplayed', stripped)
             if var: return f'Verify {camel_to_words(var.group(1))} is displayed'
     elif atype == 'verifyElementText':
         m = re.search(r'verifyElementText\s*\(\s*(\w+)\s*,\s*"(.+?)"', stripped)
-        if m: return f'Verify {camel_to_words(m.group(1))} text == "{m.group(2)[:50]}"'
+        if m: return f'Verify "{m.group(2)[:50]}" text on {camel_to_words(m.group(1))}'
         m = re.search(r'getText\s*\(\s*\)\.(?:equals|contains)\s*\(\s*"(.+?)"', stripped)
         if m: return f'Verify text contains "{m.group(1)[:50]}"'
     elif atype in ('assertTrue', 'assertFalse'):
@@ -105,16 +106,41 @@ def build_description(line, lines, idx, atype, method):
     elif atype == 'Assert.fail':
         m = re.search(r'Assert\.fail\s*\(\s*"?(.+?)"?\s*\)', stripped)
         if m and m.group(1).strip(): return f'Fail: {clean(m.group(1))}'
-        return f'{camel_to_words(method)} → catch block Assert.fail'
+        return f'{camel_to_words(method)} catch block Assert.fail'
 
-    return f'{camel_to_words(method)} → {atype}'
+    return f'{camel_to_words(method)} {atype}'
 
 
 def clean(s):
     return s.strip().strip('"').strip("'")[:60]
 
+# Abbreviation expansions for human-readable descriptions
+ABBREV_MAP = {
+    'CC': 'Credit Card', 'Cc': 'Credit Card',
+    'DC': 'Debit Card', 'Dc': 'Debit Card',
+    'DDA': 'Account', 'Dda': 'Account',
+    'ACH': 'ACH',
+    'Btn': 'Button', 'btn': 'button',
+    'Msg': 'Message', 'msg': 'message',
+}
+
 def camel_to_words(s):
-    return re.sub(r'([A-Z])', r' \1', s).strip().lower()
+    """Convert camelCase/PascalCase to readable words with abbreviation expansion."""
+    # Insert spaces before uppercase letters
+    result = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', s)
+    result = re.sub(r'([a-z\d])([A-Z])', r'\1 \2', result)
+    result = result.strip()
+    # Expand abbreviations
+    words = result.split()
+    expanded = []
+    for w in words:
+        if w in ABBREV_MAP:
+            expanded.append(ABBREV_MAP[w])
+        elif w.upper() in ABBREV_MAP:
+            expanded.append(ABBREV_MAP[w.upper()])
+        else:
+            expanded.append(w)
+    return ' '.join(expanded)
 
 
 def detect_module(filepath, platform):
@@ -169,7 +195,7 @@ def deep_scan_pages(test_file, page_dir):
                 for pattern, atype in ASSERTION_PATTERNS:
                     if re.search(pattern, line):
                         desc = build_description(line, body.split('\n'), i, atype, method_name)
-                        results.append({'line': 0, 'type': atype, 'description': f'[{method_name}] {desc}', 'method': method_name})
+                        results.append({'line': 0, 'type': atype, 'description': desc, 'method': method_name})
                         break
             break
     return results
@@ -198,6 +224,75 @@ def scan_repo(repo_path, test_dir, page_dir, platform):
             a['module'] = module
             modules[module]['assertions'].append(a)
             modules[module]['types'][a['type']] = modules[module]['types'].get(a['type'], 0) + 1
+
+    return modules
+
+
+# ==================== POST-PROCESSING ====================
+
+LOGIN_KEYWORDS = ['login', 'username', 'password', 'email input', 'sign in', 'signin']
+
+def is_login_verification(assertion):
+    """Check if an assertion is login-related."""
+    desc_lower = assertion.get('description', '').lower()
+    method_lower = assertion.get('method', '').lower()
+    for kw in LOGIN_KEYWORDS:
+        if kw in desc_lower or kw in method_lower:
+            return True
+    return False
+
+
+def post_process_modules(modules):
+    """Post-process scanned modules:
+    1. Reclassify waitForElement → Pre-condition
+    2. Deduplicate login verifications
+    3. Track preconditions separately
+    Returns (processed_modules, login_common) where login_common is a special module dict.
+    """
+    login_seen = set()  # track unique login descriptions
+    login_common = {'files': set(), 'verifications': [], 'preconditions': [], 'types': {}}
+
+    for module_name, mod in modules.items():
+        new_verifications = []
+        new_preconditions = []
+        new_types = {}
+
+        for a in mod['assertions']:
+            # Step 1: Reclassify waitForElement as Pre-condition
+            if a['type'] == 'waitForElement':
+                a_copy = dict(a)
+                a_copy['type'] = 'Pre-condition'
+                new_preconditions.append(a_copy)
+                new_types['Pre-condition'] = new_types.get('Pre-condition', 0) + 1
+                continue
+
+            # Step 2: Deduplicate login verifications
+            if is_login_verification(a):
+                login_key = a['description']
+                if login_key not in login_seen:
+                    login_seen.add(login_key)
+                    login_a = dict(a)
+                    login_a['description'] = f'{a["description"]} (common login flow)'
+                    login_common['verifications'].append(login_a)
+                    login_common['files'].add(a.get('file', ''))
+                    login_common['types'][a['type']] = login_common['types'].get(a['type'], 0) + 1
+                continue  # Don't add login verifications to individual modules
+
+            # Regular verification
+            new_verifications.append(a)
+            new_types[a['type']] = new_types.get(a['type'], 0) + 1
+
+        # Update module with separated data
+        mod['verifications'] = new_verifications
+        mod['preconditions'] = new_preconditions
+        mod['types'] = new_types
+        # Keep 'assertions' as combined for backward compat in counting
+        mod['assertions'] = new_verifications
+
+    # Add Login (Common) module if any login verifications found
+    if login_common['verifications']:
+        modules['Login (Common)'] = login_common
+        login_common['assertions'] = login_common['verifications']
 
     return modules
 
@@ -485,7 +580,7 @@ def main():
     args = sys.argv[1:]
     dry_run = '--dry-run' in args
 
-    print(f'NEXUS Assertion Scanner v2')
+    print(f'NEXUS Verification Scanner v2')
     print(f'{"="*50}')
     print(f'Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
     if dry_run: print('MODE: DRY RUN')
@@ -495,25 +590,32 @@ def main():
     if '--mobile-only' not in args:
         print('\nScanning Web repo...')
         web = scan_repo(WEB_REPO, 'src/test/java/tests', 'src/main/java/pages', 'web')
-        for n in sorted(web): print(f'  {n}: {len(web[n]["files"])} files, {len(web[n]["assertions"])} assertions')
+        print('  Post-processing Web...')
+        web = post_process_modules(web)
+        for n in sorted(web): print(f'  {n}: {len(web[n]["files"])} scripts, {len(web[n]["assertions"])} verifications, {len(web[n].get("preconditions",[]))} pre-conditions')
 
     if '--web-only' not in args:
         print('\nScanning Android...')
         android = scan_repo(MOBILE_REPO, 'src/test/java/tests/android', 'src/main/java/pages/android', 'android')
-        for n in sorted(android): print(f'  {n}: {len(android[n]["files"])} files, {len(android[n]["assertions"])} assertions')
+        android = post_process_modules(android)
+        for n in sorted(android): print(f'  {n}: {len(android[n]["files"])} scripts, {len(android[n]["assertions"])} verifications, {len(android[n].get("preconditions",[]))} pre-conditions')
 
         print('\nScanning iOS...')
         ios = scan_repo(MOBILE_REPO, 'src/test/java/tests/iOS', 'src/main/java/pages/iOS', 'ios')
-        for n in sorted(ios): print(f'  {n}: {len(ios[n]["files"])} files, {len(ios[n]["assertions"])} assertions')
+        ios = post_process_modules(ios)
+        for n in sorted(ios): print(f'  {n}: {len(ios[n]["files"])} scripts, {len(ios[n]["assertions"])} verifications, {len(ios[n].get("preconditions",[]))} pre-conditions')
 
         print('\nScanning Prod suites...')
         aprod = scan_repo(MOBILE_REPO, 'src/test/java/tests/androidProdSanitySuite', 'src/main/java/pages/android', 'android')
+        aprod = post_process_modules(aprod)
         iprod = scan_repo(MOBILE_REPO, 'src/test/java/tests/iOSProdSuite', 'src/main/java/pages/iOS', 'ios')
+        iprod = post_process_modules(iprod)
         print(f'  Android Prod: {sum(len(m["assertions"]) for m in aprod.values())}')
         print(f'  iOS Prod: {sum(len(m["assertions"]) for m in iprod.values())}')
 
     total = sum(len(m['assertions']) for d in [web,android,ios,aprod,iprod] for m in d.values())
-    print(f'\n{"="*50}\nGRAND TOTAL: {total}\n{"="*50}')
+    precond_total = sum(len(m.get('preconditions', [])) for d in [web,android,ios,aprod,iprod] for m in d.values())
+    print(f'\n{"="*50}\nGRAND TOTAL: {total} verifications + {precond_total} pre-conditions\n{"="*50}')
 
     print('\nUpdating Google Sheet...')
     update_sheet(web, android, ios, aprod, iprod, dry_run)
