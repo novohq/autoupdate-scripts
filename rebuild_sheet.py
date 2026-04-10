@@ -43,13 +43,50 @@ TYPE_FORMAT_MAP = {
     'waitForElement':    {'bg': rgb_dict(0.996, 0.953, 0.780), 'fg': rgb_dict(0.573, 0.251, 0.055)},
     'Pre-condition':     {'bg': rgb_dict(0.930, 0.930, 0.930), 'fg': rgb_dict(0.450, 0.450, 0.450)},
     'Pre-condition (waitForElement)': {'bg': rgb_dict(0.930, 0.930, 0.930), 'fg': rgb_dict(0.450, 0.450, 0.450)},
-    'Assert.fail':       {'bg': rgb_dict(0.996, 0.886, 0.886), 'fg': rgb_dict(0.600, 0.106, 0.106)},
+}
+# Note: Assert.fail is excluded by nexus_scan.py post_process_modules() and should never appear in output
+
+# ==================== HEADER COMMENTS (hover notes) ====================
+
+HEADER_COMMENTS = {
+    # Grand Summary
+    'Platform': 'Web, Android, or iOS',
+    'Modules': 'Number of test module folders detected in the repo',
+    'Test Scripts': 'Number of .java test files in this module',
+    'Verifications': 'Count of actual test checks. Excludes pre-conditions (waitForElement) and error handlers (Assert.fail)',
+    'Pre-conditions': 'waitForElement/waitForVisibility calls. These are waits before interactions, not actual test checks',
+    'Total': 'Verifications + Pre-conditions combined',
+    'Prod Suites': 'Verifications found in production/sanity smoke test suites',
+
+    # Platform Summaries
+    'Module': 'Test module name, auto-detected from folder structure (e.g. tests/Web/Cards/ → Cards)',
+    'isElementPresent': 'Checks that a UI element is displayed on screen using isDisplayed()',
+    'assertEquals': 'Compares expected value with actual value — the strongest type of verification',
+    'verifyElementText': 'Confirms the text content of a UI element matches the expected string',
+    'assertTrue/False': 'Boolean condition checks (e.g., button is visible, flag is set)',
+    '% of Total': "This module's share of the platform's total verifications",
+    'Other': 'Verification types that do not fall into the standard categories',
+
+    # Detail Sheets
+    'Test Script': 'The .java test file containing this verification',
+    'Number': 'Sequential row number within this sheet',
+    'Verification': 'Human-readable description of what is being checked',
+    'Type': 'The Java assertion/verification method used (isElementPresent, assertEquals, verifyElementText, assertTrue/assertFalse)',
+
+    # Verification Types
+    'Web': 'Count from Novo-P1-UI-Tests repository (Selenium web tests)',
+    'Android': 'Count from Novo_Mobile_UIAutomation_Appium repository (Android Appium tests)',
+    'iOS': 'Count from Novo_Mobile_UIAutomation_Appium repository (iOS Appium tests)',
+    'Prod': 'Count from production/sanity smoke test suites',
+
+    # Production Suites
+    'Suite': 'Name of the production smoke/sanity test suite',
 }
 
 # ==================== CELL BUILDER ====================
 
 def make_cell(value, bg=None, fg=None, bold=False, font_size=10, halign='LEFT',
-              font_family='Inter', border_bottom=None, border_top=None):
+              font_family='Inter', border_bottom=None, border_top=None, note=None):
     """Build a CellData dict with both userEnteredValue and userEnteredFormat."""
     cell = {}
 
@@ -82,6 +119,11 @@ def make_cell(value, bg=None, fg=None, bold=False, font_size=10, halign='LEFT',
         fmt.setdefault('borders', {})['top'] = {'style': 'SOLID', 'width': 2, 'colorStyle': {'rgbColor': border_top}}
 
     cell['userEnteredFormat'] = fmt
+
+    # Note (hover comment)
+    if note:
+        cell['note'] = note
+
     return cell
 
 
@@ -94,9 +136,10 @@ def subtitle_cell(value):
     return make_cell(value, fg=SUBTITLE_FG, font_size=10)
 
 def header_cell(value):
-    """Header row cell."""
+    """Header row cell. Automatically adds hover note from HEADER_COMMENTS if available."""
+    note = HEADER_COMMENTS.get(value)
     return make_cell(value, bg=HEADER_BG, fg=HEADER_FG, bold=True, font_size=10,
-                     halign='CENTER', border_bottom=BLUE_BORDER)
+                     halign='CENTER', border_bottom=BLUE_BORDER, note=note)
 
 def data_cell(value, alt=False, halign='LEFT', type_val=None):
     """Data row cell. If type_val provided and matches, apply type color coding."""
@@ -201,7 +244,7 @@ def write_sheet_data(spreadsheet, ws, all_rows, col_widths, freeze_rows, chunk_s
         requests.append({
             'updateCells': {
                 'rows': rows_data,
-                'fields': 'userEnteredValue,userEnteredFormat',
+                'fields': 'userEnteredValue,userEnteredFormat,note',
                 'start': {
                     'sheetId': sheet_id,
                     'rowIndex': start,
@@ -307,8 +350,10 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     rows.append(build_empty_row(NC))
 
     # Row 10: Verification Types header
+    vt_start_idx = len(rows)  # track for chart data source
     rows.append(build_header_row(['Verification Types', 'Web', 'Android', 'iOS', 'Prod', 'Total', '']))
     all_types = sorted(set(t for d in [web,android,ios,android_prod,ios_prod] for m in d.values() for t in m['types']))
+    all_types = [t for t in all_types if t != 'Assert.fail']  # Safety: exclude Assert.fail
     # Rename 'waitForElement' display and handle Pre-condition
     for i, t in enumerate(all_types):
         display_name = 'Pre-condition (waitForElement)' if t == 'Pre-condition' else t
@@ -319,40 +364,20 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
         rows.append(build_data_row([display_name, wc, ac, ic, pc, wc+ac+ic+pc, ''], alt=(i % 2 == 1), type_col=0))
     rows.append(build_total_row(['TOTAL', web_v+web_p, and_v+and_p, ios_v+ios_p, andp_v+iosp_v+andp_p+iosp_p, grand_v+grand_p, '']))
 
-    rows.append(build_empty_row(NC))
-
-    # Chart data - platform distribution
-    rows.append(build_subtitle_row('Platform Distribution (chart data)', NC))
-    rows.append(build_header_row(['Platform', 'Verifications', '', '', '', '', '']))
-    chart_start = len(rows)
-    rows.append(build_data_row(['Web', web_v, '', '', '', '', ''], alt=False))
-    rows.append(build_data_row(['Android', and_v, '', '', '', '', ''], alt=True))
-    rows.append(build_data_row(['iOS', ios_v, '', '', '', '', ''], alt=False))
-    rows.append(build_data_row(['Android Prod', andp_v, '', '', '', '', ''], alt=True))
-    rows.append(build_data_row(['iOS Prod', iosp_v, '', '', '', '', ''], alt=False))
-
-    rows.append(build_empty_row(NC))
-
-    # Chart data - top modules
-    rows.append(build_subtitle_row('Top 15 Modules (chart data)', NC))
-    rows.append(build_header_row(['Module', 'Platform', 'Verifications', '', '', '', '']))
-    mod_start = len(rows)
-    all_mods = []
-    for n, m in web.items(): all_mods.append((n, 'Web', len(m['assertions'])))
-    for n, m in android.items(): all_mods.append((n, 'Android', len(m['assertions'])))
-    for n, m in ios.items(): all_mods.append((n, 'iOS', len(m['assertions'])))
-    all_mods.sort(key=lambda x: -x[2])
-    for i, (mod, plat, cnt) in enumerate(all_mods[:15]):
-        rows.append(build_data_row([mod, plat, cnt, '', '', '', ''], alt=(i % 2 == 1)))
+    # Record where the Verification Types table starts (header row) and ends (TOTAL row)
+    # vt_header_row is the row index of the "Verification Types" header
+    # vt_total_row is the row index of the TOTAL row (last row)
+    vt_header_row = vt_start_idx
+    vt_total_row = len(rows) - 1
 
     col_widths = [160, 100, 110, 120, 130, 100, 120]
-    return rows, col_widths, 4, chart_start, mod_start  # freeze_rows=4
+    return rows, col_widths, 4, vt_header_row, vt_total_row  # freeze_rows=4
 
 
 def build_platform_summary(name, data, ts):
     """Build rows for a platform summary sheet."""
     headers = ['Module', 'Test Scripts', 'Verifications', 'Pre-conditions', 'isElementPresent', 'assertEquals',
-               'verifyElementText', 'assertTrue/False', 'Assert.fail', 'Other', '% of Total']
+               'verifyElementText', 'assertTrue/False', 'Other', '% of Total']
     NC = len(headers)
     rows = []
     rows.append(build_title_row(name, NC))
@@ -373,7 +398,6 @@ def build_platform_summary(name, data, ts):
             ty.get('isElementPresent', 0), ty.get('assertEquals', 0),
             ty.get('verifyElementText', 0),
             ty.get('assertTrue', 0) + ty.get('assertFalse', 0),
-            ty.get('Assert.fail', 0),
             sum(v for k, v in ty.items() if k not in ('isElementPresent', 'assertEquals', 'verifyElementText', 'Pre-condition', 'assertTrue', 'assertFalse', 'Assert.fail')),
             f'{pct}%'
         ])
@@ -390,12 +414,12 @@ def build_platform_summary(name, data, ts):
     # Totals
     total_precond = sum(len(m.get('preconditions', [])) for m in data.values())
     totals = ['TOTAL', sum(len(m['files']) for m in data.values()), total_verifs, total_precond]
-    for c in range(4, 10):
+    for c in range(4, 9):
         totals.append(sum(dr[c] for dr in data_rows if len(dr) > c and isinstance(dr[c], (int, float))))
     totals.append('100%')
     rows.append(build_total_row(totals))
 
-    col_widths = [180, 100, 120, 120, 130, 110, 130, 120, 100, 80, 90]
+    col_widths = [180, 100, 120, 120, 130, 110, 130, 120, 80, 90]
     return rows, col_widths, 3
 
 
@@ -414,6 +438,8 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
         for a in data[mn].get('assertions', []):
             if a.get('type') == 'Pre-condition':
                 continue  # Skip pre-conditions in detail sheets
+            if a.get('type') == 'Assert.fail':
+                continue  # Safety: exclude Assert.fail
             # Build row with bold description
             row_cells = [
                 data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
@@ -478,6 +504,7 @@ def build_verification_types(web, android, ios, android_prod, ios_prod, ts):
     grand = web_t + and_t + ios_t + andp_t + iosp_t
 
     all_types = sorted(set(t for d in [web, android, ios, android_prod, ios_prod] for m in d.values() for t in m['types']))
+    all_types = [t for t in all_types if t != 'Assert.fail']  # Safety: exclude Assert.fail
     for i, t in enumerate(all_types):
         display_name = 'Pre-condition (waitForElement)' if t == 'Pre-condition' else t
         wc = sum(m['types'].get(t, 0) for m in web.values())
@@ -494,11 +521,16 @@ def build_verification_types(web, android, ios, android_prod, ios_prod, ts):
 
 # ==================== CHARTS ====================
 
-def add_charts(spreadsheet, ws, chart_start, mod_start):
-    """Add pie chart and bar chart to Grand Summary."""
+def add_charts(spreadsheet, ws, vt_header_row, vt_total_row):
+    """Add a single stacked bar chart using the Verification Types table in Grand Summary.
+    vt_header_row: row index of the Verification Types header row
+    vt_total_row: row index of the TOTAL row at the end of the table
+    The data rows are between header+1 and total (exclusive).
+    Columns: 0=Type, 1=Web, 2=Android, 3=iOS, 4=Prod
+    """
     sid = ws.id
     try:
-        # Delete existing charts using correct API field name
+        # Delete existing charts
         meta = spreadsheet.fetch_sheet_metadata()
         existing_charts = []
         for s in meta.get('sheets', []):
@@ -507,39 +539,78 @@ def add_charts(spreadsheet, ws, chart_start, mod_start):
         for cid in existing_charts:
             spreadsheet.batch_update({'requests': [{'deleteEmbeddedObject': {'objectId': cid}}]})
 
-        requests = [
-            # Pie chart
-            {'addChart': {'chart': {
-                'spec': {
-                    'title': 'Verifications by Platform',
-                    'pieChart': {
-                        'legendPosition': 'RIGHT_LEGEND',
-                        'domain': {'sourceRange': {'sources': [{'sheetId': sid, 'startRowIndex': chart_start, 'endRowIndex': chart_start + 5, 'startColumnIndex': 0, 'endColumnIndex': 1}]}},
-                        'series': {'sourceRange': {'sources': [{'sheetId': sid, 'startRowIndex': chart_start, 'endRowIndex': chart_start + 5, 'startColumnIndex': 1, 'endColumnIndex': 2}]}},
+        # Data rows are from vt_header_row+1 to vt_total_row (exclusive of TOTAL)
+        data_start = vt_header_row + 1
+        data_end = vt_total_row  # exclusive — don't include the TOTAL row
+
+        # Stacked bar chart: Y-axis = verification types, segments = platforms (Web, Android, iOS, Prod)
+        # Column 0 = Type names (domain), Columns 1-4 = Web, Android, iOS, Prod (series)
+        series_colors = [
+            {'red': 0.23, 'green': 0.51, 'blue': 0.96},  # Web - blue
+            {'red': 0.16, 'green': 0.71, 'blue': 0.36},   # Android - green
+            {'red': 0.96, 'green': 0.62, 'blue': 0.04},   # iOS - amber
+            {'red': 0.61, 'green': 0.15, 'blue': 0.69},   # Prod - purple
+        ]
+        platform_cols = [1, 2, 3, 4]  # Web, Android, iOS, Prod
+        platform_names = ['Web', 'Android', 'iOS', 'Prod']
+
+        series = []
+        for idx, col in enumerate(platform_cols):
+            series.append({
+                'series': {
+                    'sourceRange': {
+                        'sources': [{
+                            'sheetId': sid,
+                            'startRowIndex': data_start,
+                            'endRowIndex': data_end,
+                            'startColumnIndex': col,
+                            'endColumnIndex': col + 1
+                        }]
                     }
                 },
-                'position': {'overlayPosition': {'anchorCell': {'sheetId': sid, 'rowIndex': 0, 'columnIndex': 7}, 'widthPixels': 420, 'heightPixels': 280}}
-            }}},
-            # Bar chart
+                'color': series_colors[idx],
+            })
+
+        requests = [
             {'addChart': {'chart': {
                 'spec': {
-                    'title': 'Top 15 Modules by Verifications',
+                    'title': 'Verifications by Platform and Type',
                     'basicChart': {
                         'chartType': 'BAR',
-                        'legendPosition': 'NO_LEGEND',
-                        'axis': [{'position': 'BOTTOM_AXIS', 'title': 'Assertions'}, {'position': 'LEFT_AXIS'}],
-                        'domains': [{'domain': {'sourceRange': {'sources': [{'sheetId': sid, 'startRowIndex': mod_start, 'endRowIndex': mod_start + 15, 'startColumnIndex': 0, 'endColumnIndex': 1}]}}}],
-                        'series': [{'series': {'sourceRange': {'sources': [{'sheetId': sid, 'startRowIndex': mod_start, 'endRowIndex': mod_start + 15, 'startColumnIndex': 2, 'endColumnIndex': 3}]}},
-                                    'color': {'red': 0.23, 'green': 0.51, 'blue': 0.96}}],
+                        'legendPosition': 'BOTTOM_LEGEND',
+                        'stackedType': 'STACKED',
+                        'headerCount': 0,
+                        'axis': [
+                            {'position': 'BOTTOM_AXIS', 'title': 'Count'},
+                            {'position': 'LEFT_AXIS', 'title': ''}
+                        ],
+                        'domains': [{
+                            'domain': {
+                                'sourceRange': {
+                                    'sources': [{
+                                        'sheetId': sid,
+                                        'startRowIndex': data_start,
+                                        'endRowIndex': data_end,
+                                        'startColumnIndex': 0,
+                                        'endColumnIndex': 1
+                                    }]
+                                }
+                            }
+                        }],
+                        'series': series,
                     }
                 },
-                'position': {'overlayPosition': {'anchorCell': {'sheetId': sid, 'rowIndex': 10, 'columnIndex': 7}, 'widthPixels': 520, 'heightPixels': 380}}
+                'position': {'overlayPosition': {
+                    'anchorCell': {'sheetId': sid, 'rowIndex': 0, 'columnIndex': 7},
+                    'widthPixels': 600,
+                    'heightPixels': 400
+                }}
             }}}
         ]
         spreadsheet.batch_update({'requests': requests})
-        print('  Charts added successfully')
+        print('  Stacked bar chart added successfully')
     except Exception as e:
-        print(f'  Charts warning: {e}')
+        print(f'  Chart warning: {e}')
 
 
 # ==================== CLEAN EXISTING SHEETS ====================
@@ -629,7 +700,7 @@ def main():
 
     # --- Grand Summary ---
     print('  1/12 Grand Summary...')
-    gs_rows, gs_widths, gs_freeze, chart_start, mod_start = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
+    gs_rows, gs_widths, gs_freeze, vt_header_row, vt_total_row = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, grand_ws, gs_rows, gs_widths, gs_freeze)
     print(f'    {len(gs_rows)} rows written')
     time.sleep(1)
@@ -696,7 +767,7 @@ def main():
     # Step 4: Charts
     print('\n[4/4] Adding charts to Grand Summary...')
     grand_ws = ss.worksheet('Grand Summary')
-    add_charts(ss, grand_ws, chart_start, mod_start)
+    add_charts(ss, grand_ws, vt_header_row, vt_total_row)
 
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
