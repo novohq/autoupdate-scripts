@@ -393,8 +393,10 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     total_scripts = web_scripts + and_scripts + ios_scripts
     total_modules = len(web) + len(android) + len(ios)
     prod_v = andp_v + iosp_v
+    total_v_no_prod = web_v + and_v + ios_v
+    total_p_no_prod = web_p + and_p + ios_p
     rows.append(build_total_row(['TOTAL', total_modules, total_scripts,
-                                  web_v+and_v+ios_v, web_p+and_p+ios_p, grand_v+grand_p, prod_v, '']))
+                                  total_v_no_prod, total_p_no_prod, total_v_no_prod + total_p_no_prod, prod_v, '']))
     # Row 9: blank
     rows.append(build_empty_row(NC))
 
@@ -773,13 +775,19 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
     rows.append(build_header_row(headers))
 
     num = 1
+    seen = set()  # Deduplicate by (file, description)
     for mn in sorted(data.keys()):
         # Only show actual verifications — exclude pre-conditions
         for a in data[mn].get('assertions', []):
             if a.get('type') == 'Pre-condition':
-                continue  # Skip pre-conditions in detail sheets
+                continue
             if a.get('type') == 'Assert.fail':
-                continue  # Safety: exclude Assert.fail
+                continue
+            # Deduplicate: skip if same file + same description already seen
+            dedup_key = (a.get('file', ''), a['description'])
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
             # Build row with bold description
             row_cells = [
                 data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
