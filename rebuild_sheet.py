@@ -333,8 +333,16 @@ def write_sheet_data(spreadsheet, ws, all_rows, col_widths, freeze_rows, chunk_s
 
 
 def get_or_create(ss, title, rows=2000, cols=20):
+    """Get existing sheet (preserving GID) or create if new. Clears content but keeps the sheet."""
     try:
-        return ss.worksheet(title)
+        ws = ss.worksheet(title)
+        ws.clear()  # Clear content but preserve the sheet (and its GID)
+        # Unmerge any existing merged cells
+        try:
+            ss.batch_update({'requests': [{'unmergeCells': {'range': {'sheetId': ws.id, 'startRowIndex': 0, 'endRowIndex': 2000, 'startColumnIndex': 0, 'endColumnIndex': 20}}}]})
+        except:
+            pass
+        return ws
     except:
         return ss.add_worksheet(title=title, rows=rows, cols=cols)
 
@@ -924,23 +932,28 @@ def apply_merges(spreadsheet, ws, merges):
 # ==================== CLEAN EXISTING SHEETS ====================
 
 def clean_spreadsheet(ss):
-    """Delete all sheets except the first one, clear the first one."""
+    """Clear Grand Summary content. Other sheets are cleared by get_or_create().
+    Sheets are never deleted — this preserves GIDs so the dashboard tabs don't break."""
     sheets = ss.worksheets()
-    # Keep the first sheet, rename it
     first = sheets[0]
     if first.title != 'Grand Summary':
         first.update_title('Grand Summary')
     first.clear()
-    # Resize first sheet
     first.resize(rows=2000, cols=20)
+    # Unmerge any existing merged cells on Grand Summary
+    try:
+        ss.batch_update({'requests': [{'unmergeCells': {'range': {'sheetId': first.id, 'startRowIndex': 0, 'endRowIndex': 2000, 'startColumnIndex': 0, 'endColumnIndex': 20}}}]})
+    except:
+        pass
 
-    # Delete all other sheets
-    for ws in sheets[1:]:
-        try:
-            ss.del_worksheet(ws)
-            time.sleep(0.3)
-        except Exception as e:
-            print(f'  Warning deleting {ws.title}: {e}')
+    # Delete only the Verification Types sheet if it still exists (removed from the app)
+    for ws in sheets:
+        if ws.title == 'Verification Types':
+            try:
+                ss.del_worksheet(ws)
+                print('  Removed leftover Verification Types sheet')
+            except:
+                pass
 
     return first
 
