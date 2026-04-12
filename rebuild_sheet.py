@@ -1080,11 +1080,139 @@ def main():
     hide_gridlines(ss, grand_ws)
     print('  Removed old charts, hidden gridlines.')
 
+    # Step 5: Update landing page numbers
+    print('\n[5/5] Updating landing page numbers...')
+    _web_v = sum(len(m['assertions']) for m in web.values())
+    _and_v = sum(len(m['assertions']) for m in android.values())
+    _ios_v = sum(len(m['assertions']) for m in ios.values())
+    _total_v = _web_v + _and_v + _ios_v
+    _total_scripts = sum(len(m['files']) for d in [web, android, ios] for m in d.values())
+    _total_modules = len(web) + len(android) + len(ios)
+    _prod_v = sum(len(m['assertions']) for d in [android_prod, ios_prod] for m in d.values())
+    update_landing_page_numbers(_web_v, _and_v, _ios_v, _total_v, _total_scripts, _total_modules, _prod_v)
+
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
-    print(f'DONE! All 10 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
+    print(f'DONE! All 10 sheets rebuilt + landing page updated in {elapsed:.1f}s')
     print(f'Sheet: https://docs.google.com/spreadsheets/d/{SHEET_ID}')
     print(f'{"=" * 60}')
+
+
+def update_landing_page_numbers(web_v, and_v, ios_v, total_v, total_scripts, total_modules, prod_v):
+    """Update hardcoded numbers in the landing page HTML via GitHub API."""
+    import re
+
+    # Landing page repo
+    LANDING_REPO = os.environ.get('LANDING_REPO', 'Novo-Internal-Apps/automation-insights-board')
+    LANDING_FILE = 'public/landing.html'
+    GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
+
+    if not GITHUB_TOKEN:
+        # Try local file update
+        local_path = os.environ.get('LANDING_LOCAL_PATH', '')
+        if local_path and os.path.exists(local_path):
+            _update_landing_local(local_path, web_v, and_v, ios_v, total_v, total_scripts, total_modules, prod_v)
+        else:
+            print('  SKIP: No GITHUB_TOKEN or LANDING_LOCAL_PATH set')
+        return
+
+    try:
+        import base64
+        import urllib.request
+
+        # Calculate derived values
+        manual_hours = round(total_v * 2.5 / 60)
+        auto_hours = 9
+        time_saved_pct = round((manual_hours - auto_hours) / manual_hours * 100) if manual_hours > 0 else 88
+
+        # Fetch current file from GitHub
+        url = f'https://api.github.com/repos/{LANDING_REPO}/contents/{LANDING_FILE}'
+        headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req)
+        data = json.loads(resp.read())
+        sha = data['sha']
+        content = base64.b64decode(data['content']).decode('utf-8')
+
+        # Replace numbers using regex
+        original = content
+        replacements = [
+            # Total verifications (appears as big number like 1,804 or 1804)
+            (r'(\b)1[,.]?804(\b)', f'\\g<1>{total_v:,}\\g<2>'),
+            # Web verifications
+            (r'(\b)861(\b)', f'\\g<1>{web_v}\\g<2>'),
+            # Android verifications
+            (r'(\b)669(\b)', f'\\g<1>{and_v}\\g<2>'),
+            # iOS verifications
+            (r'(\b)274(\b)', f'\\g<1>{ios_v}\\g<2>'),
+            # Total scripts
+            (r'(?<!\d)140(?!\d)', str(total_scripts)),
+            # Total modules
+            (r'(?<!\d)34(?!\d)(?!px|%|em|rem|deg|vh|vw|s\b|ms)', str(total_modules)),
+            # Time saved %
+            (r'88(%\s*<)', f'{time_saved_pct}%<'),
+            (r'88%', f'{time_saved_pct}%'),
+            # Manual hours
+            (r'~75h', f'~{manual_hours}h'),
+            # Prod suites
+            (r'(?<!\d)188(?!\d)', str(prod_v)),
+        ]
+
+        for pattern, replacement in replacements:
+            content = re.sub(pattern, replacement, content)
+
+        if content == original:
+            print('  No number changes needed')
+            return
+
+        # Commit the updated file
+        commit_data = json.dumps({
+            'message': f'Auto-update landing page numbers: {total_v:,} verifications',
+            'content': base64.b64encode(content.encode('utf-8')).decode('utf-8'),
+            'sha': sha,
+        }).encode('utf-8')
+
+        req = urllib.request.Request(url, data=commit_data, headers={**headers, 'Content-Type': 'application/json'}, method='PUT')
+        urllib.request.urlopen(req)
+        print(f'  ✅ Landing page updated: {total_v:,} verifications, {total_scripts} scripts')
+
+    except Exception as e:
+        print(f'  Landing page update failed: {e}')
+
+
+def _update_landing_local(filepath, web_v, and_v, ios_v, total_v, total_scripts, total_modules, prod_v):
+    """Update landing page numbers in a local file."""
+    import re
+
+    manual_hours = round(total_v * 2.5 / 60)
+    auto_hours = 9
+    time_saved_pct = round((manual_hours - auto_hours) / manual_hours * 100) if manual_hours > 0 else 88
+
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    original = content
+    replacements = [
+        (r'(\b)1[,.]?804(\b)', f'\\g<1>{total_v:,}\\g<2>'),
+        (r'(\b)861(\b)', f'\\g<1>{web_v}\\g<2>'),
+        (r'(\b)669(\b)', f'\\g<1>{and_v}\\g<2>'),
+        (r'(\b)274(\b)', f'\\g<1>{ios_v}\\g<2>'),
+        (r'(?<!\d)140(?!\d)', str(total_scripts)),
+        (r'88(%\s*<)', f'{time_saved_pct}%<'),
+        (r'88%', f'{time_saved_pct}%'),
+        (r'~75h', f'~{manual_hours}h'),
+        (r'(?<!\d)188(?!\d)', str(prod_v)),
+    ]
+
+    for pattern, replacement in replacements:
+        content = re.sub(pattern, replacement, content)
+
+    if content != original:
+        with open(filepath, 'w') as f:
+            f.write(content)
+        print(f'  ✅ Local landing page updated: {total_v:,} verifications')
+    else:
+        print('  No number changes needed')
 
 
 if __name__ == '__main__':

@@ -32,10 +32,11 @@ jobs:
       - name: Install dependencies
         run: pip install gspread oauth2client
 
-      - name: Run NEXUS scan + update sheet
+      - name: Run NEXUS scan + update sheet + update landing page
         env:
           GOOGLE_SHEETS_CREDS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDS_JSON }}
           NEXUS_SHEET_ID: ${{ secrets.NEXUS_SHEET_ID }}
+          GITHUB_TOKEN: ${{ secrets.LANDING_REPO_TOKEN }}
           WEB_REPO_PATH: /dev/null
           MOBILE_REPO_PATH: ${{ github.workspace }}/mobile-repo
         working-directory: scripts
