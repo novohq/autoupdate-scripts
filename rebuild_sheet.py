@@ -333,8 +333,16 @@ def write_sheet_data(spreadsheet, ws, all_rows, col_widths, freeze_rows, chunk_s
 
 
 def get_or_create(ss, title, rows=2000, cols=20):
+    """Get existing sheet (preserving GID) or create if new. Clears content but keeps the sheet."""
     try:
-        return ss.worksheet(title)
+        ws = ss.worksheet(title)
+        ws.clear()  # Clear content but preserve the sheet (and its GID)
+        # Unmerge any existing merged cells
+        try:
+            ss.batch_update({'requests': [{'unmergeCells': {'range': {'sheetId': ws.id, 'startRowIndex': 0, 'endRowIndex': 2000, 'startColumnIndex': 0, 'endColumnIndex': 20}}}]})
+        except:
+            pass
+        return ws
     except:
         return ss.add_worksheet(title=title, rows=rows, cols=cols)
 
@@ -767,7 +775,7 @@ def build_platform_summary(name, data, ts):
 
 def build_detail_sheet(sheet_name, data, ts, max_rows=None):
     """Build rows for a detail verifications sheet. Pre-conditions are excluded."""
-    headers = ['Test Script', 'Module', 'Number', 'Verification', 'Type']
+    headers = ['Number', 'Test Script', 'Module', 'Verification', 'Type']
     NC = len(headers)
     rows = []
     rows.append(build_title_row(sheet_name, NC))
@@ -790,9 +798,9 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
             seen.add(dedup_key)
             # Build row with bold description
             row_cells = [
+                data_cell(num, alt=((num - 1) % 2 == 1)),
                 data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
                 data_cell(mn, alt=((num - 1) % 2 == 1)),
-                data_cell(num, alt=((num - 1) % 2 == 1)),
                 make_cell(a['description'], bold=True, font_size=10,
                           bg=ALT_ROW_BG if (num - 1) % 2 == 1 else None),
                 data_cell(a['type'], alt=((num - 1) % 2 == 1), type_val=a['type']),
@@ -804,7 +812,7 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
         if max_rows and num - 1 >= max_rows:
             break
 
-    col_widths = [250, 150, 80, 400, 140]
+    col_widths = [70, 250, 150, 400, 140]
     return rows, col_widths, 3
 
 
@@ -924,23 +932,28 @@ def apply_merges(spreadsheet, ws, merges):
 # ==================== CLEAN EXISTING SHEETS ====================
 
 def clean_spreadsheet(ss):
-    """Delete all sheets except the first one, clear the first one."""
+    """Clear Grand Summary content. Other sheets are cleared by get_or_create().
+    Sheets are never deleted — this preserves GIDs so the dashboard tabs don't break."""
     sheets = ss.worksheets()
-    # Keep the first sheet, rename it
     first = sheets[0]
     if first.title != 'Grand Summary':
         first.update_title('Grand Summary')
     first.clear()
-    # Resize first sheet
     first.resize(rows=2000, cols=20)
+    # Unmerge any existing merged cells on Grand Summary
+    try:
+        ss.batch_update({'requests': [{'unmergeCells': {'range': {'sheetId': first.id, 'startRowIndex': 0, 'endRowIndex': 2000, 'startColumnIndex': 0, 'endColumnIndex': 20}}}]})
+    except:
+        pass
 
-    # Delete all other sheets
-    for ws in sheets[1:]:
-        try:
-            ss.del_worksheet(ws)
-            time.sleep(0.3)
-        except Exception as e:
-            print(f'  Warning deleting {ws.title}: {e}')
+    # Delete only the Verification Types sheet if it still exists (removed from the app)
+    for ws in sheets:
+        if ws.title == 'Verification Types':
+            try:
+                ss.del_worksheet(ws)
+                print('  Removed leftover Verification Types sheet')
+            except:
+                pass
 
     return first
 
@@ -1007,7 +1020,7 @@ def main():
     print('\n[3/4] Building and writing sheets with data + formatting...')
 
     # --- Grand Summary ---
-    print('  1/10 Grand Summary...')
+    print('  1/9 Grand Summary...')
     gs_rows, gs_widths, gs_freeze, gs_merges = build_grand_summary(web, android, ios, android_prod, ios_prod, ts)
     write_sheet_data(ss, grand_ws, gs_rows, gs_widths, gs_freeze)
     print(f'    {len(gs_rows)} rows written')
@@ -1017,7 +1030,7 @@ def main():
     time.sleep(1)
 
     # --- Web Summary ---
-    print('  2/10 Web Summary...')
+    print('  2/9 Web Summary...')
     ws = get_or_create(ss, 'Web Summary')
     r, cw, fr = build_platform_summary('Web Summary', web, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1025,7 +1038,7 @@ def main():
     time.sleep(0.5)
 
     # --- Android Summary ---
-    print('  3/10 Android Summary...')
+    print('  3/9 Android Summary...')
     ws = get_or_create(ss, 'Android Summary')
     r, cw, fr = build_platform_summary('Android Summary', android, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1033,7 +1046,7 @@ def main():
     time.sleep(0.5)
 
     # --- iOS Summary ---
-    print('  4/10 iOS Summary...')
+    print('  4/9 iOS Summary...')
     ws = get_or_create(ss, 'iOS Summary')
     r, cw, fr = build_platform_summary('iOS Summary', ios, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1041,7 +1054,7 @@ def main():
     time.sleep(0.5)
 
     # --- Production Suites ---
-    print('  5/10 Production Suites...')
+    print('  5/9 Production Suites...')
     ws = get_or_create(ss, 'Production Suites')
     r, cw, fr = build_prod_suites(android_prod, ios_prod, ts)
     write_sheet_data(ss, ws, r, cw, fr)
@@ -1065,13 +1078,7 @@ def main():
         print(f'    {len(r)} rows written')
         time.sleep(0.5)
 
-    # --- Verification Types ---
-    print('  10/10 Verification Types...')
-    ws = get_or_create(ss, 'Verification Types')
-    r, cw, fr = build_verification_types(web, android, ios, android_prod, ios_prod, ts)
-    write_sheet_data(ss, ws, r, cw, fr)
-    print(f'    {len(r)} rows written')
-    time.sleep(0.5)
+    # Verification Types sheet removed — already covered in Grand Summary
 
     # Step 4: Clean up Grand Summary
     print('\n[4/4] Cleaning up Grand Summary...')
@@ -1082,7 +1089,7 @@ def main():
 
     elapsed = time.time() - start_time
     print(f'\n{"=" * 60}')
-    print(f'DONE! All 10 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
+    print(f'DONE! All 9 sheets rebuilt with executive dashboard in {elapsed:.1f}s')
     print(f'Sheet: https://docs.google.com/spreadsheets/d/{SHEET_ID}')
     print(f'{"=" * 60}')
 
