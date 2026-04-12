@@ -767,7 +767,7 @@ def build_platform_summary(name, data, ts):
 
 def build_detail_sheet(sheet_name, data, ts, max_rows=None):
     """Build rows for a detail verifications sheet. Pre-conditions are excluded."""
-    headers = ['Test Script', 'Module', 'Number', 'Verification', 'Type']
+    headers = ['Number', 'Test Script', 'Module', 'Verification', 'Type']
     NC = len(headers)
     rows = []
     rows.append(build_title_row(sheet_name, NC))
@@ -790,9 +790,9 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
             seen.add(dedup_key)
             # Build row with bold description
             row_cells = [
+                data_cell(num, alt=((num - 1) % 2 == 1)),
                 data_cell(a.get('file', ''), alt=((num - 1) % 2 == 1)),
                 data_cell(mn, alt=((num - 1) % 2 == 1)),
-                data_cell(num, alt=((num - 1) % 2 == 1)),
                 make_cell(a['description'], bold=True, font_size=10,
                           bg=ALT_ROW_BG if (num - 1) % 2 == 1 else None),
                 data_cell(a['type'], alt=((num - 1) % 2 == 1), type_val=a['type']),
@@ -804,7 +804,7 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
         if max_rows and num - 1 >= max_rows:
             break
 
-    col_widths = [250, 150, 80, 400, 140]
+    col_widths = [70, 250, 150, 400, 140]
     return rows, col_widths, 3
 
 
