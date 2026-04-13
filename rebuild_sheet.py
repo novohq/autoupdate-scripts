@@ -1006,11 +1006,18 @@ def main():
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    # Support both file path (local) and JSON string (CI)
+    # Support: file path (local) → raw JSON string (CI) → Base64 encoded JSON (CI)
+    import base64
     if CREDS_PATH and os.path.exists(CREDS_PATH):
         creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
     else:
-        creds_json = json.loads(os.environ.get('GOOGLE_SHEETS_CREDS_JSON', '{}'))
+        raw = os.environ.get('GOOGLE_SHEETS_CREDS_JSON', '')
+        # Try Base64 decode first, fall back to raw JSON
+        try:
+            decoded = base64.b64decode(raw).decode('utf-8')
+            creds_json = json.loads(decoded)
+        except Exception:
+            creds_json = json.loads(raw)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
     client = gspread.authorize(creds)
     ss = client.open_by_key(SHEET_ID)
