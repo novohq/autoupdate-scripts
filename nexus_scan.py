@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 NEXUS Verification Scanner v2
-Scans Java test repos for verifications + pre-conditions, updates Google Sheets with formatting.
+Scans Java test repos for verifications, updates Google Sheets with formatting.
+waitForElement calls are reclassified as 'Assert Element Visibility with Wait' verifications.
 Usage: python3 nexus_scan.py [--web-only] [--mobile-only] [--dry-run]
 """
 
@@ -55,7 +56,7 @@ TYPE_COLORS = {
     'isElementPresent':  {'bg': (0.86, 0.92, 0.98), 'fg': (0.12, 0.25, 0.50)},  # blue
     'verifyElementText': {'bg': (0.81, 0.98, 0.98), 'fg': (0.08, 0.37, 0.46)},  # cyan
     'waitForElement':    {'bg': (1.00, 0.95, 0.78), 'fg': (0.57, 0.25, 0.05)},  # amber
-    'Pre-condition':     {'bg': (0.93, 0.93, 0.93), 'fg': (0.45, 0.45, 0.45)},  # light gray
+    'Assert Element Visibility with Wait': {'bg': (1.00, 0.95, 0.78), 'fg': (0.57, 0.25, 0.05)},  # amber
     'Assert.fail':       {'bg': (0.99, 0.87, 0.87), 'fg': (0.60, 0.10, 0.10)},  # red
 }
 HEADER_COLOR = {'bg': (0.06, 0.09, 0.16), 'fg': (1.0, 1.0, 1.0)}  # dark navy + white
@@ -258,10 +259,9 @@ def is_login_verification(assertion):
 
 def post_process_modules(modules):
     """Post-process scanned modules:
-    1. Reclassify waitForElement → Pre-condition
+    1. Reclassify waitForElement → 'Assert Element Visibility with Wait' (regular verification)
     2. Deduplicate login verifications
-    3. Track preconditions separately
-    Returns (processed_modules, login_common) where login_common is a special module dict.
+    Returns processed_modules. All waitForElement calls are now counted as verifications.
     """
     login_seen = set()  # track unique login descriptions
     login_common = {'files': set(), 'verifications': [], 'preconditions': [], 'types': {}}
@@ -272,12 +272,12 @@ def post_process_modules(modules):
         new_types = {}
 
         for a in mod['assertions']:
-            # Step 1: Reclassify waitForElement as Pre-condition
+            # Step 1: Reclassify waitForElement as a regular verification type
             if a['type'] == 'waitForElement':
                 a_copy = dict(a)
-                a_copy['type'] = 'Pre-condition'
-                new_preconditions.append(a_copy)
-                new_types['Pre-condition'] = new_types.get('Pre-condition', 0) + 1
+                a_copy['type'] = 'Assert Element Visibility with Wait'
+                new_verifications.append(a_copy)
+                new_types['Assert Element Visibility with Wait'] = new_types.get('Assert Element Visibility with Wait', 0) + 1
                 continue
 
             # Step 1b: Exclude Assert.fail (catch-all error handlers, not real verifications)
@@ -302,7 +302,7 @@ def post_process_modules(modules):
 
         # Update module with separated data
         mod['verifications'] = new_verifications
-        mod['preconditions'] = new_preconditions
+        mod['preconditions'] = new_preconditions  # now always empty
         mod['types'] = new_types
         # Keep 'assertions' as combined for backward compat in counting
         mod['assertions'] = new_verifications
