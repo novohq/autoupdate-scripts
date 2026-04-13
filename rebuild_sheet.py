@@ -1006,7 +1006,12 @@ def main():
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
+    # Support both file path (local) and JSON string (CI)
+    if CREDS_PATH and os.path.exists(CREDS_PATH):
+        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
+    else:
+        creds_json = json.loads(os.environ.get('GOOGLE_SHEETS_CREDS_JSON', '{}'))
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
     client = gspread.authorize(creds)
     ss = client.open_by_key(SHEET_ID)
     print('  Connected.')
