@@ -201,7 +201,7 @@ def total_cell(value):
     else:
         halign = 'LEFT'
     return make_cell(value, bg=TOTAL_BG, fg=TOTAL_FG, bold=True, font_size=11,
-                     border_top=BLUE_BORDER)
+                     halign=halign, border_top=BLUE_BORDER)
 
 def empty_cell():
     return make_cell('')
