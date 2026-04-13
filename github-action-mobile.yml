@@ -30,7 +30,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install gspread oauth2client
+        run: pip install gspread oauth2client google-api-python-client
 
       - name: Run NEXUS scan + update sheet
         env:
