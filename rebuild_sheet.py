@@ -49,7 +49,7 @@ TYPE_FORMAT_MAP = {
 
 MANUAL_TIME_PER_VERIFICATION_MINS = 2.5
 CI_TIMES_HOURS = {'Web': 4, 'Android': 3, 'iOS': 2}
-TOTAL_KNOWN_MODULES = 15  # denominator for maturity calculation
+# TOTAL_KNOWN_MODULES is now calculated dynamically from scan data (see build_grand_summary)
 
 # Dashboard colors
 DARK_BG = rgb_dict(0.118, 0.161, 0.231)           # #1E293B
@@ -639,11 +639,15 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
                 note='Maturity score based on: module coverage breadth (50%), verification depth per module (40%), and production suite presence (10%)'))
     # (no merge on section titles — prevents dark bar spanning all columns)
 
+    # Dynamic total: count all unique modules across all platforms
+    all_unique_modules = set(list(web.keys()) + list(android.keys()) + list(ios.keys()))
+    total_known_modules = len(all_unique_modules) if all_unique_modules else 1
+
     prod_platforms = {'Web': False, 'Android': len(android_prod) > 0, 'iOS': len(ios_prod) > 0}
     for i, plat in enumerate(['Web', 'Android', 'iOS']):
         pdata = platform_data[plat]
         mod_count = len(pdata)
-        module_coverage = mod_count / TOTAL_KNOWN_MODULES if TOTAL_KNOWN_MODULES > 0 else 0
+        module_coverage = mod_count / total_known_modules if total_known_modules > 0 else 0
         avg_verifs = (platform_verifs[plat] / mod_count) if mod_count > 0 else 0
         verification_depth = min(avg_verifs / 100, 1.0)
         prod_bonus = 0.1 if prod_platforms[plat] else 0
@@ -704,6 +708,18 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
         ('Excluded from count', 'Assert.fail (error handlers)', 'These are not actual test verifications'),
         ('Module detection', 'Folder-based (e.g. tests/Web/Cards/ \u2192 Cards)', 'Auto-detected from repository structure'),
         ('Login deduplication', 'Login verifications counted once globally', 'Prevents inflation from login steps repeated in every test'),
+        ('', '', ''),
+        ('PLATFORM MATURITY FORMULA', '', ''),
+        ('Maturity Score', 'Maturity = (Module Coverage x 50%) + (Verification Depth x 40%) + (Prod Bonus x 10%)', 'All values calculated dynamically from scan data on every run'),
+        ('Module Coverage', 'modules_with_tests / total_unique_modules', 'Total unique modules counted across all platforms (dynamic, currently ' + str(len(set(list(web.keys()) + list(android.keys()) + list(ios.keys())))) + ')'),
+        ('Verification Depth', 'avg_verifications_per_module / 100 (capped at 1.0)', 'Higher avg = more thorough testing per module. Capped so one deep module does not inflate the score'),
+        ('Prod Bonus', '10% if production suites exist, 0% if not', 'Rewards platforms that have production smoke/sanity tests'),
+        ('Maturity Labels', '70%+ = MATURE, 40-69% = GROWING, <40% = EARLY', 'Color coded: green / amber / purple'),
+        ('', '', ''),
+        ('SCRIPTS TO VERIFICATIONS RATIO', '', ''),
+        ('Ratio Formula', 'Ratio = total_verifications / total_test_scripts', 'Shown as (Nx) per platform. Higher = each script checks more things = more efficient tests'),
+        ('Interpretation', 'Web 11.3x means each web test script contains ~11 verifications on average', 'A script with higher ratio provides more coverage per file. Low ratio may indicate thin tests.'),
+        ('How to improve', 'Add more assertions per test method, or deep-scan Page Object methods', 'The scanner traces method calls into Page Objects to count verifications inside delegated methods'),
     ]
     for i, (param, value, source) in enumerate(assumptions):
         bg = ALT_ROW_BG if i % 2 == 1 else None
