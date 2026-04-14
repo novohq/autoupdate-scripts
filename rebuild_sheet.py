@@ -997,84 +997,29 @@ def main():
     print('\n[2/4] Connecting to Google Sheets...')
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.file']
     # Support: file path (local) → raw JSON string (CI) → Base64 encoded JSON (CI)
     import base64
-    creds_source = None
-    creds_json = None
     if CREDS_PATH and os.path.exists(CREDS_PATH):
-        creds_source = f'file ({CREDS_PATH})'
         creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
-        with open(CREDS_PATH) as f:
-            creds_json = json.load(f)
     else:
         raw = os.environ.get('GOOGLE_SHEETS_CREDS_JSON', '')
-        print(f'  GOOGLE_SHEETS_CREDS_JSON: present={bool(raw)} len={len(raw)} '
-              f'first8={raw[:8]!r} last4={raw[-4:]!r}')
-        if not raw:
-            sys.exit('ERROR: GOOGLE_SHEETS_CREDS_JSON env var is empty')
         # Try Base64 decode first, fall back to raw JSON
         try:
-            decoded = base64.b64decode(raw, validate=False).decode('utf-8')
+            decoded = base64.b64decode(raw).decode('utf-8')
             creds_json = json.loads(decoded)
-            creds_source = 'env (base64-decoded)'
-        except Exception as e_b64:
-            try:
-                creds_json = json.loads(raw)
-                creds_source = 'env (raw JSON)'
-            except Exception as e_json:
-                print(f'  Base64 decode error: {type(e_b64).__name__}: {e_b64}')
-                print(f'  Raw JSON parse error: {type(e_json).__name__}: {e_json}')
-                sys.exit('ERROR: GOOGLE_SHEETS_CREDS_JSON is neither valid base64-of-JSON nor raw JSON')
+        except Exception:
+            creds_json = json.loads(raw)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-
-    print(f'  Creds source: {creds_source}')
-    print(f'  Service account: {creds.service_account_email}')
-    print(f'  Project ID: {creds_json.get("project_id", "<missing>")}')
-    print(f'  Private key ID: {creds_json.get("private_key_id", "<missing>")}')
-    print(f'  Token URI: {creds_json.get("token_uri", "<missing>")}')
-    print(f'  Scopes: {scope}')
-    print(f'  Sheet ID: {repr(SHEET_ID)} (len={len(SHEET_ID)})')
-    sheet_id_clean = SHEET_ID.strip()
-    if sheet_id_clean != SHEET_ID:
-        print(f'  WARNING: SHEET_ID had surrounding whitespace, stripped to len={len(sheet_id_clean)}')
-    if not sheet_id_clean:
-        sys.exit('ERROR: NEXUS_SHEET_ID env var is empty')
-
     client = gspread.authorize(creds)
-    print(f'  gspread version: {gspread.__version__}')
-
-    # Probe Drive API directly so we can distinguish "file not found" from "no Drive access"
     try:
-        from googleapiclient.discovery import build as _gapi_build
-        drive = _gapi_build('drive', 'v3', credentials=creds, cache_discovery=False)
-        meta = drive.files().get(fileId=sheet_id_clean,
-                                 fields='id,name,driveId,mimeType,owners(emailAddress)',
-                                 supportsAllDrives=True).execute()
-        print(f'  Drive API sees file: name={meta.get("name")!r} '
-              f'mimeType={meta.get("mimeType")} driveId={meta.get("driveId")}')
-    except ImportError:
-        print('  (skipping Drive probe — google-api-python-client not installed)')
-    except Exception as e:
-        print(f'  Drive API probe failed: {type(e).__name__}: {e}')
-        if hasattr(e, 'resp') and e.resp is not None:
-            print(f'    HTTP status: {e.resp.status}')
-        if hasattr(e, 'content') and e.content:
-            try:
-                print(f'    Response: {e.content[:500].decode("utf-8", errors="replace")}')
-            except Exception:
-                pass
-
-    try:
-        ss = client.open_by_key(sheet_id_clean)
-    except Exception as e:
-        print(f'  open_by_key failed: {type(e).__name__}: {e}')
-        if hasattr(e, 'response') and e.response is not None:
-            print(f'  Response status: {e.response.status_code}')
-            print(f'  Response headers: {dict(e.response.headers)}')
-            print(f'  Response body: {e.response.text[:1000]}')
-        raise
-    print(f'  Connected. Title={ss.title!r}')
+        ss = client.open_by_key(SHEET_ID)
+    except gspread.exceptions.SpreadsheetNotFound:
+        # Shared Drive workaround: use Sheets API directly
+        print('  Trying Shared Drive access...')
+        ss = gspread.Spreadsheet(client.http_client, {'id': SHEET_ID})
+        ss._sheet_metadata = ss.fetch_sheet_metadata()
+    print('  Connected.')
 
     print('  Cleaning existing sheets...')
     grand_ws = clean_spreadsheet(ss)
