@@ -1089,9 +1089,9 @@ def main():
 
     # --- Detail sheets ---
     detail_configs = [
-        ('Web - All', web, 300),
-        ('Android - All', android, 300),
-        ('iOS - All', ios, 300),
+        ('Web - All', web, None),
+        ('Android - All', android, None),
+        ('iOS - All', ios, None),
         ('Production - All', {**android_prod, **ios_prod}, 200),
     ]
 
