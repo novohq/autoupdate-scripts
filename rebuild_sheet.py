@@ -749,7 +749,7 @@ def build_platform_summary(name, data, ts):
     totals.append('100%')
     rows.append(build_total_row(totals))
 
-    col_widths = [180, 100, 120, 130, 110, 130, 120, 200, 80, 90]
+    col_widths = [180, 100, 120, 130, 110, 130, 120, 280, 80, 90]
     return rows, col_widths, 3
 
 
@@ -789,7 +789,7 @@ def build_detail_sheet(sheet_name, data, ts, max_rows=None):
         if max_rows and num - 1 >= max_rows:
             break
 
-    col_widths = [70, 250, 150, 400, 140]
+    col_widths = [70, 250, 150, 400, 280]
     return rows, col_widths, 3
 
 
