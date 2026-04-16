@@ -430,8 +430,9 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     platform_scripts = {'Web': web_scripts, 'Android': and_scripts, 'iOS': ios_scripts}
     platform_modules = {'Web': len(web), 'Android': len(android), 'iOS': len(ios)}
 
-    # ---- SECTION 1: HERO KPIs ----
+    # ---- SECTION 1: AT A GLANCE ----
     print('    Section 1: At a Glance...')
+    rows.append(_section_title_row('At a Glance', NC))
     r = len(rows)
     # Number row (big numbers)
     rows.append([
