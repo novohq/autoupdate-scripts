@@ -431,7 +431,7 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     platform_modules = {'Web': len(web), 'Android': len(android), 'iOS': len(ios)}
 
     # ---- SECTION 1: HERO KPIs ----
-    print('    Section 1: Hero KPIs...')
+    print('    Section 1: At a Glance...')
     r = len(rows)
     # Number row (big numbers)
     rows.append([
@@ -470,8 +470,8 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     rows.append(build_empty_row(NC))
 
     # ---- SECTION 2: SCRIPTS -> VERIFICATIONS ----
-    print('    Section 2: Scripts to Verifications...')
-    rows.append(_section_title_row('Test Scripts \u2192 Verifications', NC))
+    print('    Section 2: Test Efficiency...')
+    rows.append(_section_title_row('Test Efficiency', NC))
 
     # Header row for this section
     rows.append([
@@ -595,43 +595,10 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     rows.append(build_empty_row(NC))
     rows.append(build_empty_row(NC))
 
-    # ---- SECTION 4: MODULE COVERAGE HEATMAP ----
-    print('    Section 4: Module Coverage Heatmap...')
-    rows.append(_section_title_row('Module Coverage Map', NC,
-                note='Coverage density per module per platform. \u25cf\u25cf\u25cf = 100+ verifications (high), \u25cf\u25cf = 21-99 (medium), \u25cf = 1-20 (low), \u2014 = no coverage (gap)'))
-    # (no merge on section titles — prevents dark bar spanning all columns)
+    # Module Coverage Heatmap removed — module names inconsistent across platforms
+    # Will be re-added once team agrees on module name mapping
 
-    # Header
-    rows.append([header_cell('Module'), header_cell('Web'), header_cell('Android'), header_cell('iOS'),
-                 empty_cell(), empty_cell(), empty_cell(), empty_cell()])
-
-    # Collect all unique modules
-    all_modules = sorted(set(list(web.keys()) + list(android.keys()) + list(ios.keys())))
     platform_data = {'Web': web, 'Android': android, 'iOS': ios}
-
-    for idx, mod in enumerate(all_modules):
-        row_cells = [make_cell(mod, bold=True, font_size=10, bg=ALT_ROW_BG if idx % 2 == 1 else None)]
-        for plat in ['Web', 'Android', 'iOS']:
-            pdata = platform_data[plat]
-            if mod in pdata:
-                count = len(pdata[mod]['assertions'])
-            else:
-                count = 0
-            if count >= 100:
-                row_cells.append(make_cell('\u25cf\u25cf\u25cf', bg=HEATMAP_HIGH_BG, bold=True, font_size=10, halign='CENTER'))
-            elif count >= 21:
-                row_cells.append(make_cell('\u25cf\u25cf', bg=HEATMAP_MED_BG, bold=True, font_size=10, halign='CENTER'))
-            elif count >= 1:
-                row_cells.append(make_cell('\u25cf', bg=HEATMAP_LOW_BG, bold=True, font_size=10, halign='CENTER'))
-            else:
-                row_cells.append(make_cell('\u2014', bg=HEATMAP_NONE_BG, fg=HEATMAP_NONE_FG, font_size=10, halign='CENTER'))
-        row_cells += [empty_cell() for _ in range(4)]
-        rows.append(row_cells)
-
-    # Spacing before section
-    rows.append(build_empty_row(NC))
-    rows.append(build_empty_row(NC))
-    rows.append(build_empty_row(NC))
 
     # ---- SECTION 5: PLATFORM MATURITY ----
     print('    Section 5: Platform Maturity...')
