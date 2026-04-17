@@ -508,29 +508,29 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     total_saved = round(total_manual - total_auto, 1)
     total_reduction = round(total_saved / total_manual * 100) if total_manual > 0 else 0
 
-    rows.append(_section_title_row('Automation ROI', NC))
+    rows.append(_section_title_row('Human vs Machine ROI', NC))
 
     # ROI KPI boxes - number row
     r = len(rows)
     rows.append([
         make_cell(f'~{int(total_manual)} hrs', bg=DARK_BG, fg=KPI_BLUE, bold=True, font_size=24, halign='LEFT',
-                  note=f'Calculated as total_verifications x 3 min per verification. Industry standard for UI automation: 1-5 min per manual check, 3 min is a realistic average.'),
+                  note=f'Calculated as total_verifications x 3 min per verification. Industry standard for UI automation: 1-5 min per human-driven check, 3 min is a realistic average.'),
         make_cell('', bg=DARK_BG),
         make_cell(f'~{int(total_auto)} hrs', bg=DARK_BG, fg=KPI_GREEN, bold=True, font_size=24, halign='LEFT',
                   note=f'Based on CI regression run durations: Web ~4hrs, Android ~3hrs, iOS ~2hrs'),
         make_cell('', bg=DARK_BG),
         make_cell(f'~{int(total_saved)} hrs', bg=DARK_BG, fg=KPI_PURPLE, bold=True, font_size=24, halign='LEFT',
-                  note='Manual effort minus automated time per regression cycle'),
+                  note='Human-driven effort minus machine-driven time per regression cycle'),
         make_cell('', bg=DARK_BG),
         make_cell(f'{total_reduction}%', bg=DARK_BG, fg=KPI_AMBER, bold=True, font_size=24, halign='LEFT',
-                  note='Percentage of manual effort eliminated by automation'),
+                  note='Percentage of human-driven effort eliminated by machine-driven testing'),
         make_cell('', bg=DARK_BG),
     ])
     # Label row
     rows.append([
-        make_cell('Manual Effort', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='LEFT'),
+        make_cell('Human-driven Effort', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='LEFT'),
         make_cell('', bg=DARK_BG),
-        make_cell('Automated Time', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='LEFT'),
+        make_cell('Machine-driven Time', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='LEFT'),
         make_cell('', bg=DARK_BG),
         make_cell('Time Saved', bg=DARK_BG, fg=LABEL_GRAY, font_size=10, halign='LEFT'),
         make_cell('', bg=DARK_BG),
@@ -557,7 +557,7 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     rows.append(build_empty_row(NC))
 
     # Per-platform breakdown table
-    rows.append([header_cell('Platform'), header_cell('Manual'), header_cell('Automated'),
+    rows.append([header_cell('Platform'), header_cell('Human-driven'), header_cell('Machine-driven'),
                  header_cell('Saved'), header_cell('Reduction'), empty_cell(), empty_cell(), empty_cell()])
     for i, plat in enumerate(['Web', 'Android', 'iOS']):
         d = roi_data[plat]
@@ -644,7 +644,7 @@ def build_grand_summary(web, android, ios, android_prod, ios_prod, ts):
     merges.append({'startRowIndex': r, 'endRowIndex': r + 1, 'startColumnIndex': 4, 'endColumnIndex': 8})
 
     assumptions = [
-        ('Manual verification time', '3 min per check', 'Industry standard (realistic average). Range: 1-5 min depending on complexity'),
+        ('Human-driven check time', '3 min per check', 'Industry standard (realistic average). Range: 1-5 min depending on complexity'),
         ('Web CI regression time', '~4 hours', 'Based on Novo-P1-UI-Tests GitHub Actions run history'),
         ('Android CI regression time', '~3 hours', 'Estimated based on Appium mobile test execution benchmarks'),
         ('iOS CI regression time', '~2 hours', 'Estimated based on Appium mobile test execution benchmarks'),
